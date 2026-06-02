@@ -27,7 +27,7 @@ public class Server {
     private static String currentPrice = "--";
     private static String currentPnL = "0.00";
 
-   public static void main(String[] args) throws Exception {
+   static void main(String[] args) throws Exception {
 
        HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
 
@@ -196,15 +196,26 @@ public class Server {
 
         double changePercent = ((lastClose - firstClose) / firstClose) * 100.0;
 
-        if (changePercent > 0.05) {
-            currentSignal = "BUY";
-        } else if (changePercent < -0.05) {
-            currentSignal = "SELL";
-        } else {
-            currentSignal = "Așteptare";
-        }
+        if (changePercent >= 0.50) {
+            currentSignal = "TREND SUS PUTERNIC";
+            return "BUY";
 
-        return currentSignal;
+        } else if (changePercent >= 0.20) {
+            currentSignal = "TREND SUS SLAB";
+            return "BUY";
+
+        } else if (changePercent <= -0.50) {
+            currentSignal = "TREND JOS PUTERNIC";
+            return "SELL";
+
+        } else if (changePercent <= -0.20) {
+            currentSignal = "TREND JOS SLAB";
+            return "SELL";
+
+        } else {
+            currentSignal = "TREND LATERAL";
+            return "Așteptare";
+        }
     }
 
     private static String getCurrentPrice() throws Exception {
