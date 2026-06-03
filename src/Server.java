@@ -77,12 +77,15 @@ public class Server {
 
                                        closePosition(realDealId);
 
+                                       currentSignal = "PAUZĂ 5 MINUTE DUPĂ ÎNCHIDERE";
+                                       currentPnL = "0.00";
+
+                                       Thread.sleep(300000); // pauză 5 minute
+
                                        currentSignal = "Așteptare";
 
-                                       currentPnL = "0.00";
+                                       break;
                                    }
-
-                                   break;
                                }
 
                                Thread.sleep(3000);
@@ -180,8 +183,54 @@ public class Server {
    }
 
     private static String analyzeMarket() throws Exception {
+        String trend15m = analyzeTrend("MINUTE_15", 96);
+        String trend30m = analyzeTrend("MINUTE_30", 48);
+        String trend1h = analyzeTrend("HOUR", 24);
+        String trend4h = analyzeTrend("HOUR_4", 6);
+        String trend3d = analyzeTrend("DAY", 3);
+        String colors = analyzeColors50();
+
+        int up = 0;
+        int down = 0;
+
+        if (trend15m.equals("SUS")) up++;
+        if (trend30m.equals("SUS")) up++;
+        if (trend1h.equals("SUS")) up++;
+        if (trend4h.equals("SUS")) up++;
+        if (trend3d.equals("SUS")) up++;
+
+        if (trend15m.equals("JOS")) down++;
+        if (trend30m.equals("JOS")) down++;
+        if (trend1h.equals("JOS")) down++;
+        if (trend4h.equals("JOS")) down++;
+        if (trend3d.equals("JOS")) down++;
+
+        String entry5m = analyzeTrend("MINUTE_5", 50);
+
+        if (up >= 4 &&
+                entry5m.equals("SUS") &&
+                colors.equals("VERDE")) {
+
+            currentSignal = "TREND SUS + CULORI";
+            return "BUY";
+
+        } else if (down >= 4 &&
+                entry5m.equals("JOS") &&
+                colors.equals("ROSU")) {
+
+            currentSignal = "TREND JOS + CULORI";
+            return "SELL";
+
+        } else {
+
+            currentSignal = "TREND LATERAL / AȘTEPTARE";
+            return "Așteptare";
+        }
+    }
+
+    private static String analyzeTrend(String resolution, int max) throws Exception {
         String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
-        String response = get("/prices/" + epicEncoded + "?resolution=MINUTE_5&max=31");
+        String response = get("/prices/" + epicEncoded + "?resolution=" + resolution + "&max=" + max);
 
         double firstClose = extractFirstCloseMid(response);
         double lastClose = extractPreviousCloseMid(response);
@@ -191,33 +240,59 @@ public class Server {
         }
 
         if (firstClose <= 0 || lastClose <= 0) {
-            currentSignal = "Așteptare";
-            return currentSignal;
+            return "LATERAL";
         }
 
         double changePercent = ((lastClose - firstClose) / firstClose) * 100.0;
 
-        if (changePercent >= 0.50) {
-            currentSignal = "TREND SUS PUTERNIC";
-            return "BUY";
-
-        } else if (changePercent >= 0.20) {
-            currentSignal = "TREND SUS SLAB";
-            return "BUY";
-
-        } else if (changePercent <= -0.50) {
-            currentSignal = "TREND JOS PUTERNIC";
-            return "SELL";
-
-        } else if (changePercent <= -0.20) {
-            currentSignal = "TREND JOS SLAB";
-            return "SELL";
-
+        if (changePercent >= 0.30) {
+            return "SUS";
+        } else if (changePercent <= -0.30) {
+            return "JOS";
         } else {
-            currentSignal = "TREND LATERAL";
-            return "Așteptare";
+            return "LATERAL";
         }
+        }
+
+    private static String analyzeColors50() throws Exception {
+
+        String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
+
+        String response = get("/prices/" + epicEncoded + "?resolution=MINUTE_5&max=50");
+
+        Matcher matcher = Pattern.compile(
+                "\"openPrice\"\\s*:\\s*\\{\\s*\"bid\"\\s*:\\s*([0-9.\\-]+).*?" +
+                        "\"closePrice\"\\s*:\\s*\\{\\s*\"bid\"\\s*:\\s*([0-9.\\-]+)",
+                Pattern.DOTALL
+        ).matcher(response);
+
+        int green = 0;
+        int red = 0;
+
+        while (matcher.find()) {
+
+            double open = Double.parseDouble(matcher.group(1));
+            double close = Double.parseDouble(matcher.group(2));
+
+            if (close > open) {
+                green++;
+            } else if (close < open) {
+                red++;
+            }
+        }
+
+        if (green >= 32) {
+            return "VERDE";
+        }
+
+        if (red >= 32) {
+            return "ROSU";
+        }
+
+        return "NEUTRU";
     }
+
+
 
     private static String getCurrentPrice() throws Exception {
         String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
