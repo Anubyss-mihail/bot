@@ -229,9 +229,9 @@ public class Server {
 // Afișează procentul trendului în aplicație
         currentSignal = "CHANGE: " + format(changePercent) + "%";
 
-        if (changePercent >= 0.05) {
+        if (changePercent >= 0.02) {
             return "SUS";
-        } else if (changePercent <= -0.05) {
+        } else if (changePercent <= -0.02) {
             return "JOS";
         }else {
             currentSignal = "AȘTEPTARE";
