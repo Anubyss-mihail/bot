@@ -1,6 +1,7 @@
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
+import javax.swing.*;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
@@ -30,200 +31,180 @@ public class Server {
 
     public static void main(String[] args) throws Exception {
 
-       HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
+        HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
 
-       server.createContext("/", exchange -> send(exchange, 200, "Server Capital.com API OK"));
+        server.createContext("/", exchange -> send(exchange, 200, "Server Capital.com API OK"));
 
-       server.createContext("/start", exchange -> {
-           try {
-               ensureLogin();
+        server.createContext("/start", exchange -> {
+            try {
+                ensureLogin();
 
-               if (isBotRunning) {
-                   send(exchange, 200, "Bot deja ruleaza.");
-                   return;
-               }
+                if (isBotRunning) {
+                    send(exchange, 200, "Bot deja ruleaza.");
+                    return;
+                }
 
-               isBotRunning = true;
+                isBotRunning = true;
 
-               new Thread(() -> {
-                   try {
-                       double size = DEFAULT_SIZE;
+                new Thread(() -> {
+                    try {
+                        double size = DEFAULT_SIZE;
 
-                       while (isBotRunning) {
+                        while (isBotRunning) {
 
-                           String side = analyzeMarket();
+                            String side = analyzeMarket();
 
-                           if (side.equals("Așteptare")) {
+                            if (side.equals("Așteptare")) {
 
-                               Thread.sleep(60000);
-                               continue;
-                           }
+                                Thread.sleep(millisUntilNext5MinuteCandleClose());
+                                continue;
+                            }
 
-                           openPosition(side, size);
+                            String openResult = openPosition(side, size);
 
-                           while (isBotRunning) {
+                            if (openResult == null || openResult.isBlank()) {
 
-                               currentPnL = getPnL();
+                                currentSignal = "EROARE DESCHIDERE POZIȚIE";
 
-                               double pnl = Double.parseDouble(currentPnL);
+                                Thread.sleep(10000);
 
-                               if (pnl >= 5.0 || pnl <= -1.0) {
+                                continue;
+                            }
 
-                                   String positions = get("/positions");
 
-                                   String realDealId = extractJsonValue(positions, "dealId");
+                            while (isBotRunning) {
 
-                                   if (realDealId != null && !realDealId.isBlank()) {
+                                currentPnL = getPnL();
 
-                                       closePosition(realDealId);
+                                double pnl = Double.parseDouble(currentPnL);
 
-                                       currentSignal = "PAUZĂ 5 MINUTE DUPĂ ÎNCHIDERE";
-                                       currentPnL = "0.00";
+                                if (pnl >= 5.0 || pnl <= -1.0) {
 
-                                       Thread.sleep(300000); // pauză 5 minute
+                                    String positions = get("/positions");
 
-                                       currentSignal = "Așteptare";
+                                    String realDealId = extractJsonValue(positions, "dealId");
 
-                                       break;
-                                   }
-                               }
+                                    if (realDealId != null && !realDealId.isBlank()) {
 
-                               Thread.sleep(3000);
-                           }
-                       }
+                                        closePosition(realDealId);
 
-                   } catch (Exception e) {
-                       isBotRunning = false;
-                       System.out.println("AUTO START ERROR: " + e.getMessage());
-                   }
-               }).start();
+                                        currentSignal = "Așteptare";
 
-               send(exchange, 200, "Bot pornit. Analizeaza si intra automat.");
+                                        break;
+                                    }
+                                }
 
-           } catch (Exception e) {
-               isBotRunning = false;
-               sendSafe(exchange, 500, "ERROR: " + e.getMessage());
-           }
-       });
+                                Thread.sleep(3000);
+                            }
+                        }
 
-       server.createContext("/stop", exchange -> {
-           try {
-               ensureLogin();
+                    } catch (Exception e) {
+                        isBotRunning = false;
+                        System.out.println("AUTO START ERROR: " + e.getMessage());
+                    }
+                }).start();
 
-               String positions = get("/positions");
-               String realDealId = extractJsonValue(positions, "dealId");
+                send(exchange, 200, "Bot pornit. Analizeaza si intra automat.");
 
-               if (realDealId == null || realDealId.isBlank()) {
-                   isBotRunning = false;
-                   currentSignal = "Așteptare";
-                   currentPnL = "0.00";
-                   send(exchange, 200, "Nu am gasit nicio pozitie deschisa.");
-                   return;
-               }
+            } catch (Exception e) {
+                isBotRunning = false;
+                sendSafe(exchange, 500, "ERROR: " + e.getMessage());
+            }
+        });
 
-               String result = closePosition(realDealId);
+        server.createContext("/stop", exchange -> {
+            try {
+                ensureLogin();
 
-               isBotRunning = false;
-               currentSignal = "Așteptare";
-               currentPnL = "0.00";
+                String positions = get("/positions");
+                String realDealId = extractJsonValue(positions, "dealId");
 
-               send(exchange, 200, "Pozitie inchisa: " + result);
+                if (realDealId == null || realDealId.isBlank()) {
+                    isBotRunning = false;
+                    currentSignal = "Așteptare";
+                    currentPnL = "0.00";
+                    send(exchange, 200, "Nu am gasit nicio pozitie deschisa.");
+                    return;
+                }
 
-           } catch (Exception e) {
-               isBotRunning = false;
-               sendSafe(exchange, 500, "ERROR: " + e.getMessage());
-           }
-       });
+                String result = closePosition(realDealId);
 
-       server.createContext("/status", exchange -> {
-           try {
-               ensureLogin();
-               currentPrice = getCurrentPrice();
-               currentPnL = getPnL();
-           } catch (Exception ignored) {
-           }
+                isBotRunning = false;
+                currentSignal = "Așteptare";
+                currentPnL = "0.00";
 
-           String json = "{" + "\"status\":\"" + (isBotRunning ? "RUNNING" : "STOP") + "\"," + "\"server\":\"" + (isBotRunning ? "CONECTAT" : "DECONECTAT") + "\"," + "\"platform\":\"Capital.com\"," + "\"symbol\":\"" + EPIC + "\"," + "\"price\":\"" + currentPrice + "\"," + "\"signal\":\"" + currentSignal + "\"," + "\"pnl\":\"" + currentPnL + "\"" + "}";
+                send(exchange, 200, "Pozitie inchisa: " + result);
 
-           sendJson(exchange, 200, json);
-       });
+            } catch (Exception e) {
+                isBotRunning = false;
+                sendSafe(exchange, 500, "ERROR: " + e.getMessage());
+            }
+        });
 
-       server.createContext("/price", exchange -> {
-           try {
-               ensureLogin();
-               currentPrice = getCurrentPrice();
-               send(exchange, 200, currentPrice);
-           } catch (Exception e) {
-               sendSafe(exchange, 500, "PRICE ERROR: " + e.getMessage());
-           }
-       });
+        server.createContext("/status", exchange -> {
+            try {
+                ensureLogin();
+                currentPrice = getCurrentPrice();
+                currentPnL = getPnL();
+            } catch (Exception ignored) {
+            }
 
-       server.createContext("/positions", exchange -> {
-           try {
-               ensureLogin();
-               send(exchange, 200, get("/positions"));
-           } catch (Exception e) {
-               sendSafe(exchange, 500, "ERROR: " + e.getMessage());
-           }
-       });
+            String json = "{" + "\"status\":\"" + (isBotRunning ? "RUNNING" : "STOP") + "\"," + "\"server\":\"" + (isBotRunning ? "CONECTAT" : "DECONECTAT") + "\"," + "\"platform\":\"Capital.com\"," + "\"symbol\":\"" + EPIC + "\"," + "\"price\":\"" + currentPrice + "\"," + "\"signal\":\"" + currentSignal + "\"," + "\"pnl\":\"" + currentPnL + "\"" + "}";
 
-       server.createContext("/analyze", exchange -> {
-           try {
-               ensureLogin();
-               String signal = analyzeMarket();
-               send(exchange, 200, "Signal: " + signal + "\nPrice: " + currentPrice);
-           } catch (Exception e) {
-               sendSafe(exchange, 500, "ANALYZE ERROR: " + e.getMessage());
-           }
-       });
+            sendJson(exchange, 200, json);
+        });
 
-       server.start();
+        server.createContext("/price", exchange -> {
+            try {
+                ensureLogin();
+                currentPrice = getCurrentPrice();
+                send(exchange, 200, currentPrice);
+            } catch (Exception e) {
+                sendSafe(exchange, 500, "PRICE ERROR: " + e.getMessage());
+            }
+        });
 
-       System.out.println("Server pornit: http://localhost:8080");
-   }
+        server.createContext("/positions", exchange -> {
+            try {
+                ensureLogin();
+                send(exchange, 200, get("/positions"));
+            } catch (Exception e) {
+                sendSafe(exchange, 500, "ERROR: " + e.getMessage());
+            }
+        });
+
+        server.createContext("/analyze", exchange -> {
+            try {
+                ensureLogin();
+                String signal = analyzeMarket();
+                send(exchange, 200, "Signal: " + signal + "\nPrice: " + currentPrice);
+            } catch (Exception e) {
+                sendSafe(exchange, 500, "ANALYZE ERROR: " + e.getMessage());
+            }
+        });
+
+        server.start();
+
+        System.out.println("Server pornit: http://localhost:8080");
+    }
 
     private static String analyzeMarket() throws Exception {
-        String trend15m = analyzeTrend("MINUTE_15", 96);
-        String trend30m = analyzeTrend("MINUTE_30", 48);
-        String trend1h = analyzeTrend("HOUR", 24);
-        String trend4h = analyzeTrend("HOUR_4", 6);
-        String trend3d = analyzeTrend("DAY", 3);
-        String colors = analyzeColors50();
 
-        int up = 0;
-        int down = 0;
+        String currentTrend = analyzeTrend("MINUTE_5", 20);
 
-        if (trend15m.equals("SUS")) up++;
-        if (trend30m.equals("SUS")) up++;
-        if (trend1h.equals("SUS")) up++;
-        if (trend4h.equals("SUS")) up++;
-        if (trend3d.equals("SUS")) up++;
+        if (currentTrend.equals("SUS")) {
 
-        if (trend15m.equals("JOS")) down++;
-        if (trend30m.equals("JOS")) down++;
-        if (trend1h.equals("JOS")) down++;
-        if (trend4h.equals("JOS")) down++;
-        if (trend3d.equals("JOS")) down++;
-
-        String entry5m = analyzeTrend("MINUTE_5", 50);
-
-        if (up >= 4 &&
-                entry5m.equals("SUS") &&
-                colors.equals("VERDE")) {
-
-            currentSignal = "TREND SUS + CULORI";
+            currentSignal = "SCALPING TREND SUS";
             return "BUY";
 
-        } else if (down >= 4 &&
-                entry5m.equals("JOS") &&
-                colors.equals("ROSU")) {
+        } else if (currentTrend.equals("JOS")) {
 
-            currentSignal = "TREND JOS + CULORI";
+            currentSignal = "SCALPING TREND JOS";
             return "SELL";
 
         } else {
 
-            currentSignal = "TREND LATERAL / AȘTEPTARE";
+            currentSignal = "SCALPING AȘTEPTARE";
             return "Așteptare";
         }
     }
@@ -235,63 +216,29 @@ public class Server {
         double firstClose = extractFirstCloseMid(response);
         double lastClose = extractPreviousCloseMid(response);
 
-        if (lastClose > 0) {
-            currentPrice = formatPlatformPrice(lastClose);
+// Protecție: dacă API-ul nu trimite preț valid, botul nu intră
+        if (firstClose <= 0 || lastClose <= 0) {
+            currentSignal = "PREȚ INVALID / AȘTEPTARE";
+            return "Așteptare";
         }
 
-        if (firstClose <= 0 || lastClose <= 0) {
-            return "LATERAL";
-        }
+        currentPrice = formatPlatformPrice(lastClose);
 
         double changePercent = ((lastClose - firstClose) / firstClose) * 100.0;
 
-        if (changePercent >= 0.30) {
+// Afișează procentul trendului în aplicație
+        currentSignal = "CHANGE: " + format(changePercent) + "%";
+
+        if (changePercent >= 0.05) {
             return "SUS";
-        } else if (changePercent <= -0.30) {
+        } else if (changePercent <= -0.05) {
             return "JOS";
-        } else {
-            return "LATERAL";
+        }else {
+            currentSignal = "AȘTEPTARE";
+            return "asteptare";
+
         }
-        }
-
-    private static String analyzeColors50() throws Exception {
-
-        String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
-
-        String response = get("/prices/" + epicEncoded + "?resolution=MINUTE_5&max=50");
-
-        Matcher matcher = Pattern.compile(
-                "\"openPrice\"\\s*:\\s*\\{\\s*\"bid\"\\s*:\\s*([0-9.\\-]+).*?" +
-                        "\"closePrice\"\\s*:\\s*\\{\\s*\"bid\"\\s*:\\s*([0-9.\\-]+)",
-                Pattern.DOTALL
-        ).matcher(response);
-
-        int green = 0;
-        int red = 0;
-
-        while (matcher.find()) {
-
-            double open = Double.parseDouble(matcher.group(1));
-            double close = Double.parseDouble(matcher.group(2));
-
-            if (close > open) {
-                green++;
-            } else if (close < open) {
-                red++;
-            }
-        }
-
-        if (green >= 32) {
-            return "VERDE";
-        }
-
-        if (red >= 32) {
-            return "ROSU";
-        }
-
-        return "NEUTRU";
     }
-
 
 
     private static String getCurrentPrice() throws Exception {
@@ -532,5 +479,17 @@ public class Server {
             send(exchange, code, response);
         } catch (IOException ignored) {
         }
+
     }
+
+    private static long millisUntilNext5MinuteCandleClose() {
+        long now = System.currentTimeMillis();
+
+        long fiveMinutes = 5 * 60 * 1000;
+
+        long nextClose = ((now / fiveMinutes) + 1) * fiveMinutes;
+
+        return nextClose - now + 2000;
+    }
+
 }
