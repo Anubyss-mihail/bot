@@ -27,7 +27,7 @@ public class Server {
     private static String currentSignal = "Așteptare";
     private static String currentPrice = "--";
     private static String currentPnL = "0.00";
-
+    private static String currentCandleInfo = "";
 
     public static void main(String[] args) throws Exception {
 
@@ -190,7 +190,7 @@ public class Server {
 
     private static String analyzeMarket() throws Exception {
 
-        String currentTrend = analyzeTrend("MINUTE_5", 20);
+        String currentTrend = analyzeTrend("MINUTE_5", 50);
 
         if (currentTrend.equals("SUS")) {
 
@@ -215,6 +215,7 @@ public class Server {
 
         double firstClose = extractFirstCloseMid(response);
         double lastClose = extractPreviousCloseMid(response);
+        currentCandleInfo = "Lucrez cu ultima lumânare închisă M5";
 
 // Protecție: dacă API-ul nu trimite preț valid, botul nu intră
         if (firstClose <= 0 || lastClose <= 0) {
@@ -227,15 +228,15 @@ public class Server {
         double changePercent = ((lastClose - firstClose) / firstClose) * 100.0;
 
 // Afișează procentul trendului în aplicație
-        currentSignal = "CHANGE: " + format(changePercent) + "%";
+        currentSignal = "CHANGE: " + format(changePercent) + "% | " + currentCandleInfo;
 
-        if (changePercent >= 0.02) {
+        if (changePercent >= 0.10) {
             return "SUS";
-        } else if (changePercent <= -0.02) {
+        } else if (changePercent <= -0.10) {
             return "JOS";
         }else {
             currentSignal = "AȘTEPTARE";
-            return "asteptare";
+            return "Asteptare";
 
         }
     }
