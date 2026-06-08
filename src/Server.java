@@ -17,7 +17,7 @@ public class Server {
     private static final String API_KEY = "vT415Pqw6MXxwZFo";
     private static final String EMAIL = "anubyssanubyss@gmail.com";
     private static final String API_PASSWORD = "Moldova1@.";
-    private static final double DEFAULT_SIZE = 0.05;
+    private static final double DEFAULT_SIZE = 1.20;
     private static final String EPIC = "GOLD";
     private static String CST = "";
     private static String SECURITY_TOKEN = "";
@@ -26,7 +26,6 @@ public class Server {
     private static String currentSignal = "Așteptare";
     private static String currentPrice = "--";
     private static String currentPnL = "0.00";
-    private static int consecutiveLosses = 0;
 
     public static void main(String[] args) throws Exception {
 
