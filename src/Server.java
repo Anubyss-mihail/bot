@@ -1,7 +1,6 @@
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
-import javax.swing.*;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
@@ -18,7 +17,7 @@ public class Server {
     private static final String API_KEY = "vT415Pqw6MXxwZFo";
     private static final String EMAIL = "anubyssanubyss@gmail.com";
     private static final String API_PASSWORD = "Moldova1@.";
-    private static final double DEFAULT_SIZE = 0.5;
+    private static final double DEFAULT_SIZE = 0.05;
     private static final String EPIC = "GOLD";
     private static String CST = "";
     private static String SECURITY_TOKEN = "";
@@ -27,7 +26,7 @@ public class Server {
     private static String currentSignal = "Așteptare";
     private static String currentPrice = "--";
     private static String currentPnL = "0.00";
-    private static String currentCandleInfo = "";
+    private static int consecutiveLosses = 0;
 
     public static void main(String[] args) throws Exception {
 
@@ -52,12 +51,14 @@ public class Server {
 
                         while (isBotRunning) {
 
+                            long wait = millisUntilNext5MinuteCandleClose();
+
+                            Thread.sleep(wait);
+
                             String side = analyzeMarket();
-
                             if (side.equals("Așteptare")) {
-
-                                Thread.sleep(millisUntilNext5MinuteCandleClose());
                                 continue;
+
                             }
 
                             String openResult = openPosition(side, size);
@@ -82,7 +83,7 @@ public class Server {
 
                                     String positions = get("/positions");
 
-                                    String realDealId = extractJsonValue(positions, "dealId");
+                                    String realDealId = getDealIdForCurrentEpic(positions);
 
                                     if (realDealId != null && !realDealId.isBlank()) {
 
@@ -91,8 +92,10 @@ public class Server {
                                         currentSignal = "Așteptare";
 
                                         break;
+
                                     }
                                 }
+
 
                                 Thread.sleep(3000);
                             }
@@ -117,7 +120,7 @@ public class Server {
                 ensureLogin();
 
                 String positions = get("/positions");
-                String realDealId = extractJsonValue(positions, "dealId");
+                String realDealId = getDealIdForCurrentEpic(positions);
 
                 if (realDealId == null || realDealId.isBlank()) {
                     isBotRunning = false;
@@ -190,23 +193,19 @@ public class Server {
 
     private static String analyzeMarket() throws Exception {
 
-        String currentTrend = analyzeTrend("MINUTE_5", 50);
+        String mainTrend = analyzeTrend("MINUTE_5", 31);
+        String fastTrend = analyzeTrend("MINUTE_5", 10);
 
-        if (currentTrend.equals("SUS")) {
-
-            currentSignal = "SCALPING TREND SUS";
+        if (mainTrend.equals("SUS") && fastTrend.equals("SUS")) {
             return "BUY";
-
-        } else if (currentTrend.equals("JOS")) {
-
-            currentSignal = "SCALPING TREND JOS";
+        }
+        else if (mainTrend.equals("JOS") && fastTrend.equals("JOS")) {
             return "SELL";
-
-        } else {
-
-            currentSignal = "SCALPING AȘTEPTARE";
+        }
+        else {
             return "Așteptare";
         }
+
     }
 
     private static String analyzeTrend(String resolution, int max) throws Exception {
@@ -215,7 +214,6 @@ public class Server {
 
         double firstClose = extractFirstCloseMid(response);
         double lastClose = extractPreviousCloseMid(response);
-        currentCandleInfo = "Lucrez cu ultima lumânare închisă M5";
 
 // Protecție: dacă API-ul nu trimite preț valid, botul nu intră
         if (firstClose <= 0 || lastClose <= 0) {
@@ -228,15 +226,15 @@ public class Server {
         double changePercent = ((lastClose - firstClose) / firstClose) * 100.0;
 
 // Afișează procentul trendului în aplicație
-        currentSignal = "CHANGE: " + format(changePercent) + "% | " + currentCandleInfo;
+        currentSignal = "CHANGE: " + format(changePercent) + "%";
 
-        if (changePercent >= 0.10) {
+        if (changePercent >= 0.05) {
             return "SUS";
-        } else if (changePercent <= -0.10) {
+        } else if (changePercent <= -0.05) {
             return "JOS";
         }else {
             currentSignal = "AȘTEPTARE";
-            return "Asteptare";
+            return "Așteptare";
 
         }
     }
@@ -258,7 +256,25 @@ public class Server {
 
     private static String getPnL() throws Exception {
         String positions = get("/positions");
-        double pnl = extractJsonNumber(positions, "upl");
+
+        int epicIndex = positions.indexOf("\"epic\":\"" + EPIC + "\"");
+
+        if (epicIndex == -1) {
+            return "0.00";
+        }
+
+        String beforeEpic = positions.substring(0, epicIndex);
+
+        int positionStart = beforeEpic.lastIndexOf("\"position\"");
+
+        if (positionStart == -1) {
+            return "0.00";
+        }
+
+        String positionBlock = positions.substring(positionStart, epicIndex);
+
+        double pnl = extractJsonNumber(positionBlock, "upl");
+
         return format(pnl);
     }
 
@@ -340,6 +356,26 @@ public class Server {
         if (end == -1) return null;
 
         return json.substring(start, end);
+    }
+
+    private static String getDealIdForCurrentEpic(String positions) {
+        int epicIndex = positions.indexOf("\"epic\":\"" + EPIC + "\"");
+
+        if (epicIndex == -1) {
+            return null;
+        }
+
+        String beforeEpic = positions.substring(0, epicIndex);
+
+        int positionStart = beforeEpic.lastIndexOf("\"position\"");
+
+        if (positionStart == -1) {
+            return null;
+        }
+
+        String positionBlock = positions.substring(positionStart, epicIndex);
+
+        return extractJsonValue(positionBlock, "dealId");
     }
 
     private static void login() throws Exception {
