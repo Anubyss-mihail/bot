@@ -17,7 +17,7 @@ public class Server {
     private static final String API_KEY = "vT415Pqw6MXxwZFo";
     private static final String EMAIL = "anubyssanubyss@gmail.com";
     private static final String API_PASSWORD = "Moldova1@.";
-    private static final double DEFAULT_SIZE = 1.20;
+    private static final double DEFAULT_SIZE = 0.50;
     private static final String EPIC = "GOLD";
     private static String CST = "";
     private static String SECURITY_TOKEN = "";
@@ -192,50 +192,51 @@ public class Server {
 
     private static String analyzeMarket() throws Exception {
 
-        String mainTrend = analyzeTrend("MINUTE_5", 31);
-        String fastTrend = analyzeTrend("MINUTE_5", 10);
+        double emaFast = calculateEMA("MINUTE_5", 51, 25);
+        double emaSlow = calculateEMA("MINUTE_5", 51, 51);
 
-        if (mainTrend.equals("SUS") && fastTrend.equals("SUS")) {
+        System.out.println("EMA FAST = " + emaFast);
+        System.out.println("EMA SLOW = " + emaSlow);
+
+        if (emaFast > emaSlow) {
+            currentSignal = "EMA SUS";
             return "BUY";
-        }
-        else if (mainTrend.equals("JOS") && fastTrend.equals("JOS")) {
+
+        } else if (emaFast < emaSlow) {
+            currentSignal = "EMA JOS";
             return "SELL";
-        }
-        else {
+
+        } else {
+            currentSignal = "EMA AȘTEPTARE";
             return "Așteptare";
         }
-
     }
 
-    private static String analyzeTrend(String resolution, int max) throws Exception {
+    private static double calculateEMA(String resolution, int max, int period) throws Exception {
         String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
         String response = get("/prices/" + epicEncoded + "?resolution=" + resolution + "&max=" + max);
 
-        double firstClose = extractFirstCloseMid(response);
-        double lastClose = extractPreviousCloseMid(response);
+        Matcher matcher = closePriceMatcher(response);
 
-// Protecție: dacă API-ul nu trimite preț valid, botul nu intră
-        if (firstClose <= 0 || lastClose <= 0) {
-            currentSignal = "PREȚ INVALID / AȘTEPTARE";
-            return "Așteptare";
+        double ema = 0.0;
+        double multiplier = 2.0 / (period + 1);
+
+        boolean first = true;
+
+        while (matcher.find()) {
+            double bid = Double.parseDouble(matcher.group(1));
+            double ask = Double.parseDouble(matcher.group(2));
+            double close = (bid + ask) / 2.0;
+
+            if (first) {
+                ema = close;
+                first = false;
+            } else {
+                ema = (close - ema) * multiplier + ema;
+            }
         }
 
-        currentPrice = formatPlatformPrice(lastClose);
-
-        double changePercent = ((lastClose - firstClose) / firstClose) * 100.0;
-
-// Afișează procentul trendului în aplicație
-        currentSignal = "CHANGE: " + format(changePercent) + "%";
-
-        if (changePercent >= 0.05) {
-            return "SUS";
-        } else if (changePercent <= -0.05) {
-            return "JOS";
-        }else {
-            currentSignal = "AȘTEPTARE";
-            return "Așteptare";
-
-        }
+        return ema;
     }
 
 
@@ -277,17 +278,7 @@ public class Server {
         return format(pnl);
     }
 
-    private static double extractFirstCloseMid(String json) {
-        Matcher matcher = closePriceMatcher(json);
 
-        if (matcher.find()) {
-            double bid = Double.parseDouble(matcher.group(1));
-            double ask = Double.parseDouble(matcher.group(2));
-            return (bid + ask) / 2.0;
-        }
-
-        return 0.0;
-    }
 
     private static double extractLastCloseMid(String json) {
         Matcher matcher = closePriceMatcher(json);
@@ -302,25 +293,7 @@ public class Server {
         return last;
     }
 
-    private static double extractPreviousCloseMid(String json) {
 
-        Matcher matcher = closePriceMatcher(json);
-
-        double previous = 0.0;
-        double last = 0.0;
-
-        while (matcher.find()) {
-
-            previous = last;
-
-            double bid = Double.parseDouble(matcher.group(1));
-            double ask = Double.parseDouble(matcher.group(2));
-
-            last = (bid + ask) / 2.0;
-        }
-
-        return previous;
-    }
 
     private static Matcher closePriceMatcher(String json) {
         Pattern pattern = Pattern.compile("\"closePrice\"\\s*:\\s*\\{\\s*\"bid\"\\s*:\\s*([0-9.\\-]+)\\s*,\\s*\"ask\"\\s*:\\s*([0-9.\\-]+)");
