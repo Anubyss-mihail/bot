@@ -192,8 +192,8 @@ public class Server {
 
     private static String analyzeMarket() throws Exception {
 
-        double emaFast = calculateEMA("MINUTE_5", 51, 25);
-        double emaSlow = calculateEMA("MINUTE_5", 51, 51);
+        double emaFast = calculateEMA("MINUTE_5", 71, 35);
+        double emaSlow = calculateEMA("MINUTE_5", 71, 71);
 
         System.out.println("EMA FAST = " + emaFast);
         System.out.println("EMA SLOW = " + emaSlow);
