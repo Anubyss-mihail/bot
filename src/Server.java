@@ -78,7 +78,7 @@ public class Server {
 
                                 double pnl = Double.parseDouble(currentPnL);
 
-                                if (pnl >= 5.0 || pnl <= -1.0) {
+                                if (pnl >= 7.0 || pnl <= -3.0) {
 
                                     String positions = get("/positions");
 
