@@ -195,19 +195,27 @@ public class Server {
         double emaFast = calculateEMA("MINUTE_5", 51, 25);
         double emaSlow = calculateEMA("MINUTE_5", 51, 51);
 
-        System.out.println("EMA FAST = " + emaFast);
-        System.out.println("EMA SLOW = " + emaSlow);
+        double rsi = calculateRSI("MINUTE_5", 51, 25);
 
-        if (emaFast > emaSlow) {
-            currentSignal = "EMA SUS";
+        double adx = calculateADX("MINUTE_5", 51, 25);
+
+        double atr = calculateATR("MINUTE_5", 51, 25);
+
+        currentSignal = "EMA: " + format(emaFast - emaSlow)
+                + " | RSI: " + format(rsi)
+                + " | ADX: " + format(adx)
+                + " | ATR: " + format(atr);
+
+        if (emaFast > emaSlow && rsi > 55 && adx > 20 && atr > 0.30) {
+            currentSignal = "BUY: EMA + RSI + ADX + ATR";
             return "BUY";
 
-        } else if (emaFast < emaSlow) {
-            currentSignal = "EMA JOS";
+        } else if (emaFast < emaSlow && rsi < 45 && adx > 20 && atr > 0.30) {
+            currentSignal = "SELL: EMA + RSI + ADX + ATR";
             return "SELL";
 
         } else {
-            currentSignal = "EMA AȘTEPTARE";
+            currentSignal = "AȘTEPTARE: EMA/RSI/ADX/ATR";
             return "Așteptare";
         }
     }
@@ -238,6 +246,143 @@ public class Server {
 
         return ema;
     }
+
+    private static double calculateRSI(String resolution, int max, int period) throws Exception {
+        String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
+        String response = get("/prices/" + epicEncoded + "?resolution=" + resolution + "&max=" + max);
+
+        Matcher matcher = closePriceMatcher(response);
+
+        double previousClose = 0.0;
+        double gain = 0.0;
+        double loss = 0.0;
+        int count = 0;
+
+        while (matcher.find()) {
+            double bid = Double.parseDouble(matcher.group(1));
+            double ask = Double.parseDouble(matcher.group(2));
+            double close = (bid + ask) / 2.0;
+
+            if (previousClose > 0) {
+                double change = close - previousClose;
+
+                if (change > 0) {
+                    gain += change;
+                } else {
+                    loss += Math.abs(change);
+                }
+
+                count++;
+            }
+
+            previousClose = close;
+        }
+
+        if (count == 0 || loss == 0) {
+            return 50.0;
+        }
+
+        double avgGain = gain / count;
+        double avgLoss = loss / count;
+
+        double rs = avgGain / avgLoss;
+
+        return 100.0 - (100.0 / (1.0 + rs));
+    }
+
+    private static double calculateATR(String resolution, int max, int period) throws Exception {
+        double[][] candles = getCandles(resolution, max);
+
+        if (candles.length <= period) return 0.0;
+
+        double totalTR = 0.0;
+
+        for (int i = 1; i < candles.length; i++) {
+            double high = candles[i][0];
+            double low = candles[i][1];
+            double prevClose = candles[i - 1][2];
+
+            double tr = Math.max(
+                    high - low,
+                    Math.max(Math.abs(high - prevClose), Math.abs(low - prevClose))
+            );
+
+            totalTR += tr;
+        }
+
+        return totalTR / (candles.length - 1);
+    }
+
+    private static double calculateADX(String resolution, int max, int period) throws Exception {
+        double[][] candles = getCandles(resolution, max);
+
+        if (candles.length <= period) return 0.0;
+
+        double plusDMTotal = 0.0;
+        double minusDMTotal = 0.0;
+        double trTotal = 0.0;
+
+        for (int i = 1; i < candles.length; i++) {
+            double currentHigh = candles[i][0];
+            double currentLow = candles[i][1];
+            double previousHigh = candles[i - 1][0];
+            double previousLow = candles[i - 1][1];
+            double previousClose = candles[i - 1][2];
+
+            double upMove = currentHigh - previousHigh;
+            double downMove = previousLow - currentLow;
+
+            double plusDM = (upMove > downMove && upMove > 0) ? upMove : 0.0;
+            double minusDM = (downMove > upMove && downMove > 0) ? downMove : 0.0;
+
+            double tr = Math.max(
+                    currentHigh - currentLow,
+                    Math.max(Math.abs(currentHigh - previousClose), Math.abs(currentLow - previousClose))
+            );
+
+            plusDMTotal += plusDM;
+            minusDMTotal += minusDM;
+            trTotal += tr;
+        }
+
+        if (trTotal == 0.0) return 0.0;
+
+        double plusDI = 100.0 * (plusDMTotal / trTotal);
+        double minusDI = 100.0 * (minusDMTotal / trTotal);
+
+        double dx = 100.0 * Math.abs(plusDI - minusDI) / (plusDI + minusDI);
+
+        if (Double.isNaN(dx)) return 0.0;
+
+        return dx;
+    }
+
+    private static double[][] getCandles(String resolution, int max) throws Exception {
+        String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
+        String response = get("/prices/" + epicEncoded + "?resolution=" + resolution + "&max=" + max);
+
+        Pattern pattern = Pattern.compile(
+                "\"highPrice\"\\s*:\\s*\\{\\s*\"bid\"\\s*:\\s*([0-9.\\-]+)\\s*,\\s*\"ask\"\\s*:\\s*([0-9.\\-]+).*?"
+                        + "\"lowPrice\"\\s*:\\s*\\{\\s*\"bid\"\\s*:\\s*([0-9.\\-]+)\\s*,\\s*\"ask\"\\s*:\\s*([0-9.\\-]+).*?"
+                        + "\"closePrice\"\\s*:\\s*\\{\\s*\"bid\"\\s*:\\s*([0-9.\\-]+)\\s*,\\s*\"ask\"\\s*:\\s*([0-9.\\-]+)"
+        );
+
+        Matcher matcher = pattern.matcher(response);
+
+        java.util.ArrayList<double[]> candles = new java.util.ArrayList<>();
+
+        while (matcher.find()) {
+            double high = (Double.parseDouble(matcher.group(1)) + Double.parseDouble(matcher.group(2))) / 2.0;
+            double low = (Double.parseDouble(matcher.group(3)) + Double.parseDouble(matcher.group(4))) / 2.0;
+            double close = (Double.parseDouble(matcher.group(5)) + Double.parseDouble(matcher.group(6))) / 2.0;
+
+            candles.add(new double[]{high, low, close});
+        }
+
+        return candles.toArray(new double[0][]);
+    }
+
+
 
 
     private static String getCurrentPrice() throws Exception {
