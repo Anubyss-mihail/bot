@@ -192,49 +192,45 @@ public class Server {
 
     private static String analyzeMarket() throws Exception {
 
-        double emaFast = calculateEMA("MINUTE_5", 51, 25);
-        double emaSlow = calculateEMA("MINUTE_5", 51, 51);
+        double[][] candles = getCandles("MINUTE_5", 100);
 
-        double rsi = calculateRSI("MINUTE_5", 51, 25);
+        double emaFast = calculateEMA(candles, 31);
+        double emaSlow = calculateEMA(candles, 61);
 
-        double adx = calculateADX("MINUTE_5", 51, 25);
+        double rsi = calculateRSI(candles, 31);
+        double adx = calculateADX(candles, 31);
+        double atr = calculateATR(candles, 31);
 
-        double atr = calculateATR("MINUTE_5", 51, 25);
+        String structure = analyzeMarketStructure(candles);
 
-        currentSignal = "EMA: " + format(emaFast - emaSlow)
-                + " | RSI: " + format(rsi)
-                + " | ADX: " + format(adx)
-                + " | ATR: " + format(atr);
+        currentSignal = "EMA=" + format(emaFast - emaSlow)
+                + " RSI=" + format(rsi)
+                + " ADX=" + format(adx)
+                + " ATR=" + format(atr)
+                + " STRUCT=" + structure;
 
-        if (emaFast > emaSlow && rsi > 55 && adx > 20 && atr > 0.30) {
-            currentSignal = "BUY: EMA + RSI + ADX + ATR";
+        if (emaFast > emaSlow && rsi > 55 && adx > 20 && atr > 0.30 && structure.equals("SUS")) {
+            currentSignal = "BUY: EMA + RSI + ADX + ATR + STRUCTURĂ";
             return "BUY";
 
-        } else if (emaFast < emaSlow && rsi < 45 && adx > 20 && atr > 0.30) {
-            currentSignal = "SELL: EMA + RSI + ADX + ATR";
+        } else if (emaFast < emaSlow && rsi < 45 && adx > 20 && atr > 0.30 && structure.equals("JOS")) {
+            currentSignal = "SELL: EMA + RSI + ADX + ATR + STRUCTURĂ";
             return "SELL";
 
         } else {
-            currentSignal = "AȘTEPTARE: EMA/RSI/ADX/ATR";
+            currentSignal = "AȘTEPTARE: EMA/RSI/ADX/ATR/STRUCTURĂ";
             return "Așteptare";
         }
     }
 
-    private static double calculateEMA(String resolution, int max, int period) throws Exception {
-        String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
-        String response = get("/prices/" + epicEncoded + "?resolution=" + resolution + "&max=" + max);
-
-        Matcher matcher = closePriceMatcher(response);
+    private static double calculateEMA(double[][] candles, int period) {
 
         double ema = 0.0;
         double multiplier = 2.0 / (period + 1);
-
         boolean first = true;
 
-        while (matcher.find()) {
-            double bid = Double.parseDouble(matcher.group(1));
-            double ask = Double.parseDouble(matcher.group(2));
-            double close = (bid + ask) / 2.0;
+        for (double[] candle : candles) {
+            double close = candle[2];
 
             if (first) {
                 ema = close;
@@ -247,53 +243,52 @@ public class Server {
         return ema;
     }
 
-    private static double calculateRSI(String resolution, int max, int period) throws Exception {
-        String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
-        String response = get("/prices/" + epicEncoded + "?resolution=" + resolution + "&max=" + max);
+    private static double calculateRSI(double[][] candles, int period) {
 
-        Matcher matcher = closePriceMatcher(response);
-
-        double previousClose = 0.0;
-        double gain = 0.0;
-        double loss = 0.0;
-        int count = 0;
-
-        while (matcher.find()) {
-            double bid = Double.parseDouble(matcher.group(1));
-            double ask = Double.parseDouble(matcher.group(2));
-            double close = (bid + ask) / 2.0;
-
-            if (previousClose > 0) {
-                double change = close - previousClose;
-
-                if (change > 0) {
-                    gain += change;
-                } else {
-                    loss += Math.abs(change);
-                }
-
-                count++;
-            }
-
-            previousClose = close;
-        }
-
-        if (count == 0 || loss == 0) {
+        if (candles.length <= period) {
             return 50.0;
         }
 
-        double avgGain = gain / count;
-        double avgLoss = loss / count;
+        double gain = 0.0;
+        double loss = 0.0;
+
+        for (int i = 1; i <= period; i++) {
+            double change = candles[i][2] - candles[i - 1][2];
+
+            if (change > 0) {
+                gain += change;
+            } else {
+                loss += Math.abs(change);
+            }
+        }
+
+        double avgGain = gain / period;
+        double avgLoss = loss / period;
+
+        for (int i = period + 1; i < candles.length; i++) {
+            double change = candles[i][2] - candles[i - 1][2];
+
+            double currentGain = change > 0 ? change : 0.0;
+            double currentLoss = change < 0 ? Math.abs(change) : 0.0;
+
+            avgGain = ((avgGain * (period - 1)) + currentGain) / period;
+            avgLoss = ((avgLoss * (period - 1)) + currentLoss) / period;
+        }
+
+        if (avgLoss == 0.0) {
+            return 100.0;
+        }
 
         double rs = avgGain / avgLoss;
 
         return 100.0 - (100.0 / (1.0 + rs));
     }
 
-    private static double calculateATR(String resolution, int max, int period) throws Exception {
-        double[][] candles = getCandles(resolution, max);
+    private static double calculateATR(double[][] candles, int period) {
 
-        if (candles.length <= period) return 0.0;
+        if (candles.length <= period) {
+            return 0.0;
+        }
 
         double totalTR = 0.0;
 
@@ -313,16 +308,17 @@ public class Server {
         return totalTR / (candles.length - 1);
     }
 
-    private static double calculateADX(String resolution, int max, int period) throws Exception {
-        double[][] candles = getCandles(resolution, max);
+    private static double calculateADX(double[][] candles, int period) {
 
-        if (candles.length <= period) return 0.0;
+        if (candles.length <= period * 2) {
+            return 0.0;
+        }
 
-        double plusDMTotal = 0.0;
-        double minusDMTotal = 0.0;
-        double trTotal = 0.0;
+        double smoothedTR = 0.0;
+        double smoothedPlusDM = 0.0;
+        double smoothedMinusDM = 0.0;
 
-        for (int i = 1; i < candles.length; i++) {
+        for (int i = 1; i <= period; i++) {
             double currentHigh = candles[i][0];
             double currentLow = candles[i][1];
             double previousHigh = candles[i - 1][0];
@@ -340,21 +336,65 @@ public class Server {
                     Math.max(Math.abs(currentHigh - previousClose), Math.abs(currentLow - previousClose))
             );
 
-            plusDMTotal += plusDM;
-            minusDMTotal += minusDM;
-            trTotal += tr;
+            smoothedTR += tr;
+            smoothedPlusDM += plusDM;
+            smoothedMinusDM += minusDM;
         }
 
-        if (trTotal == 0.0) return 0.0;
+        double adx = 0.0;
+        int dxCount = 0;
 
-        double plusDI = 100.0 * (plusDMTotal / trTotal);
-        double minusDI = 100.0 * (minusDMTotal / trTotal);
+        for (int i = period + 1; i < candles.length; i++) {
+            double currentHigh = candles[i][0];
+            double currentLow = candles[i][1];
+            double previousHigh = candles[i - 1][0];
+            double previousLow = candles[i - 1][1];
+            double previousClose = candles[i - 1][2];
 
-        double dx = 100.0 * Math.abs(plusDI - minusDI) / (plusDI + minusDI);
+            double upMove = currentHigh - previousHigh;
+            double downMove = previousLow - currentLow;
 
-        if (Double.isNaN(dx)) return 0.0;
+            double plusDM = (upMove > downMove && upMove > 0) ? upMove : 0.0;
+            double minusDM = (downMove > upMove && downMove > 0) ? downMove : 0.0;
 
-        return dx;
+            double tr = Math.max(
+                    currentHigh - currentLow,
+                    Math.max(Math.abs(currentHigh - previousClose), Math.abs(currentLow - previousClose))
+            );
+
+            smoothedTR = smoothedTR - (smoothedTR / period) + tr;
+            smoothedPlusDM = smoothedPlusDM - (smoothedPlusDM / period) + plusDM;
+            smoothedMinusDM = smoothedMinusDM - (smoothedMinusDM / period) + minusDM;
+
+            if (smoothedTR == 0.0) {
+                continue;
+            }
+
+            double plusDI = 100.0 * (smoothedPlusDM / smoothedTR);
+            double minusDI = 100.0 * (smoothedMinusDM / smoothedTR);
+
+            double diSum = plusDI + minusDI;
+
+            if (diSum == 0.0) {
+                continue;
+            }
+
+            double dx = 100.0 * Math.abs(plusDI - minusDI) / diSum;
+
+            if (dxCount == 0) {
+                adx = dx;
+            } else {
+                adx = ((adx * (period - 1)) + dx) / period;
+            }
+
+            dxCount++;
+        }
+
+        if (Double.isNaN(adx)) {
+            return 0.0;
+        }
+
+        return adx;
     }
 
     private static double[][] getCandles(String resolution, int max) throws Exception {
@@ -383,6 +423,30 @@ public class Server {
     }
 
 
+    private static String analyzeMarketStructure(double[][] candles) {
+
+        if (candles.length < 6) {
+            return "Așteptare";
+        }
+
+        double high1 = candles[candles.length - 6][0];
+        double high2 = candles[candles.length - 4][0];
+        double high3 = candles[candles.length - 2][0];
+
+        double low1 = candles[candles.length - 6][1];
+        double low2 = candles[candles.length - 4][1];
+        double low3 = candles[candles.length - 2][1];
+
+        if (high3 > high2 && high2 > high1 && low3 > low2 && low2 > low1) {
+            return "SUS";
+        }
+
+        if (high3 < high2 && high2 < high1 && low3 < low2 && low2 < low1) {
+            return "JOS";
+        }
+
+        return "Așteptare";
+    }
 
 
     private static String getCurrentPrice() throws Exception {
