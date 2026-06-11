@@ -195,7 +195,7 @@ public class Server {
         double[][] candles = getCandles("MINUTE_5", 100);
 
         double emaFast = calculateEMA(candles, 31);
-        double emaSlow = calculateEMA(candles, 31);
+        double emaSlow = calculateEMA(candles, 61);
 
         double rsi = calculateRSI(candles, 31);
         double adx = calculateADX(candles, 31);
