@@ -89,6 +89,8 @@ public class Server {
 
                             String openResult = openPosition(side, size);
 
+                            currentSignal = side + " " + currentEpic;
+
                             System.out.println("OPEN RESULT: " + openResult);
                             currentSignal = "OPEN RESULT: " + openResult;
 
