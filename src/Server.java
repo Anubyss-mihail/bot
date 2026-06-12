@@ -89,20 +89,26 @@ public class Server {
 
                             String openResult = openPosition(side, size);
 
-                            currentSignal = side + " " + currentEpic;
-
                             System.out.println("OPEN RESULT: " + openResult);
-                            currentSignal = "OPEN RESULT: " + openResult;
-
 
                             if (openResult == null || openResult.isBlank() || !openResult.contains("dealReference")) {
-
                                 currentSignal = "EROARE OPEN: " + openResult;
-
                                 Thread.sleep(10000);
-
                                 continue;
                             }
+
+                            String dealReference = extractJsonValue(openResult, "dealReference");
+                            String confirmResult = confirmDeal(dealReference);
+
+                            System.out.println("CONFIRM RESULT: " + confirmResult);
+
+                            if (!confirmResult.contains("ACCEPTED")) {
+                                currentSignal = "ORDIN RESPINS: " + confirmResult;
+                                Thread.sleep(10000);
+                                continue;
+                            }
+
+                            currentSignal = side + " CONFIRMAT " + currentEpic;
 
 
                             while (isBotRunning) {
@@ -193,19 +199,26 @@ public class Server {
         server.createContext("/price", exchange -> {
             try {
                 ensureLogin();
-                currentPrice = getCurrentPrice();
-                send(exchange, 200, currentPrice);
+
+                StringBuilder result = new StringBuilder();
+
+                String oldEpic = currentEpic;
+
+                for (String epic : EPICS) {
+                    currentEpic = epic;
+
+                    result.append(epic)
+                            .append(" = ")
+                            .append(getCurrentPrice())
+                            .append("\n");
+                }
+
+                currentEpic = oldEpic;
+
+                send(exchange, 200, result.toString());
+
             } catch (Exception e) {
                 sendSafe(exchange, 500, "PRICE ERROR: " + e.getMessage());
-            }
-        });
-
-        server.createContext("/positions", exchange -> {
-            try {
-                ensureLogin();
-                send(exchange, 200, get("/positions"));
-            } catch (Exception e) {
-                sendSafe(exchange, 500, "ERROR: " + e.getMessage());
             }
         });
 
@@ -506,6 +519,7 @@ public class Server {
         String response = get("/prices/" + epicEncoded + "?resolution=MINUTE&max=2");
 
 
+
         double price = extractLastCloseMid(response);
 
         if (price <= 0) {
@@ -580,6 +594,10 @@ public class Server {
         if (end == -1) return null;
 
         return json.substring(start, end);
+    }
+
+    private static String confirmDeal(String dealReference) throws Exception {
+        return get("/confirms/" + URLEncoder.encode(dealReference, StandardCharsets.UTF_8));
     }
 
     private static String getDealIdForCurrentEpic(String positions) {
@@ -714,6 +732,7 @@ public class Server {
 
         return result.toString();
     }
+
 
     private static String format(double value) {
         return String.format(java.util.Locale.US, "%.4f", value);
