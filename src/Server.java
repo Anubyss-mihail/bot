@@ -18,7 +18,15 @@ public class Server {
     private static final String EMAIL = "anubyssanubyss@gmail.com";
     private static final String API_PASSWORD = "Moldova1@.";
     private static final double DEFAULT_SIZE = 0.50;
-    private static final String EPIC = "GOLD";
+    private static final String[] EPICS = {
+            "GOLD",
+            "BTCUSD",
+            "ETHUSD",
+            "XRPUSD",
+            "SOLUSD"
+    };
+
+    private static String currentEpic = "GOLD";
     private static String CST = "";
     private static String SECURITY_TOKEN = "";
 
@@ -54,10 +62,28 @@ public class Server {
 
                             Thread.sleep(wait);
 
-                            String side = analyzeMarket();
+                            String side = "Așteptare";
+
+                            for (String epic : EPICS) {
+                                currentEpic = epic;
+
+                                side = analyzeMarket();
+
+                                if (!side.equals("Așteptare")) {
+                                    break;
+                                }
+                            }
+
                             if (side.equals("Așteptare")) {
                                 continue;
+                            }
 
+                            String preOpenPositions = get("/positions");
+
+                            if (hasAnyOpenPositionInEpics(preOpenPositions)) {
+                                currentSignal = "EXISTĂ DEJA O POZIȚIE DESCHISĂ - NU DESCHID ALTA";
+                                Thread.sleep(3000);
+                                continue;
                             }
 
                             String openResult = openPosition(side, size);
@@ -151,7 +177,7 @@ public class Server {
             } catch (Exception ignored) {
             }
 
-            String json = "{" + "\"status\":\"" + (isBotRunning ? "RUNNING" : "STOP") + "\"," + "\"server\":\"" + (isBotRunning ? "CONECTAT" : "DECONECTAT") + "\"," + "\"platform\":\"Capital.com\"," + "\"symbol\":\"" + EPIC + "\"," + "\"price\":\"" + currentPrice + "\"," + "\"signal\":\"" + currentSignal + "\"," + "\"pnl\":\"" + currentPnL + "\"" + "}";
+            String json = "{" + "\"status\":\"" + (isBotRunning ? "RUNNING" : "STOP") + "\"," + "\"server\":\"" + (isBotRunning ? "CONECTAT" : "DECONECTAT") + "\"," + "\"platform\":\"Capital.com\"," + "\"symbol\":\"" + currentEpic + "\"," + "\"price\":\"" + currentPrice + "\"," + "\"signal\":\"" + currentSignal + "\"," + "\"pnl\":\"" + currentPnL + "\"" + "}";
 
             sendJson(exchange, 200, json);
         });
@@ -194,12 +220,12 @@ public class Server {
 
         double[][] candles = getCandles("MINUTE_5", 100);
 
-        double emaFast = calculateEMA(candles, 31);
+        double emaFast = calculateEMA(candles, 26);
         double emaSlow = calculateEMA(candles, 61);
 
-        double rsi = calculateRSI(candles, 31);
-        double adx = calculateADX(candles, 31);
-        double atr = calculateATR(candles, 31);
+        double rsi = calculateRSI(candles, 26);
+        double adx = calculateADX(candles, 26);
+        double atr = calculateATR(candles, 26);
 
         String structure = analyzeMarketStructure(candles);
 
@@ -398,7 +424,7 @@ public class Server {
     }
 
     private static double[][] getCandles(String resolution, int max) throws Exception {
-        String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
+        String epicEncoded = URLEncoder.encode(currentEpic, StandardCharsets.UTF_8);
         String response = get("/prices/" + epicEncoded + "?resolution=" + resolution + "&max=" + max);
 
         Pattern pattern = Pattern.compile(
@@ -408,7 +434,6 @@ public class Server {
         );
 
         Matcher matcher = pattern.matcher(response);
-
         java.util.ArrayList<double[]> candles = new java.util.ArrayList<>();
 
         while (matcher.find()) {
@@ -450,7 +475,7 @@ public class Server {
 
 
     private static String getCurrentPrice() throws Exception {
-        String epicEncoded = URLEncoder.encode(EPIC, StandardCharsets.UTF_8);
+        String epicEncoded = URLEncoder.encode(currentEpic, StandardCharsets.UTF_8);
         String response = get("/prices/" + epicEncoded + "?resolution=MINUTE&max=2");
 
 
@@ -466,7 +491,7 @@ public class Server {
     private static String getPnL() throws Exception {
         String positions = get("/positions");
 
-        int epicIndex = positions.indexOf("\"epic\":\"" + EPIC + "\"");
+        int epicIndex = positions.indexOf("\"epic\":\"" + currentEpic + "\"");
 
         if (epicIndex == -1) {
             return "0.00";
@@ -540,7 +565,7 @@ public class Server {
     }
 
     private static String getDealIdForCurrentEpic(String positions) {
-        int epicIndex = positions.indexOf("\"epic\":\"" + EPIC + "\"");
+        int epicIndex = positions.indexOf("\"epic\":\"" + currentEpic + "\"");
 
         if (epicIndex == -1) {
             return null;
@@ -557,6 +582,16 @@ public class Server {
         String positionBlock = positions.substring(positionStart, epicIndex);
 
         return extractJsonValue(positionBlock, "dealId");
+    }
+
+    private static boolean hasAnyOpenPositionInEpics(String positions) {
+        for (String epic : EPICS) {
+            if (positions.contains("\"epic\":\"" + epic + "\"")) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void login() throws Exception {
@@ -591,7 +626,7 @@ public class Server {
     private static String openPosition(String side, double size) throws Exception {
         String direction = side.equals("SELL") ? "SELL" : "BUY";
 
-        String body = "{" + "\"epic\":\"" + EPIC + "\"," + "\"direction\":\"" + direction + "\"," + "\"size\":" + size + "," + "\"orderType\":\"MARKET\"," + "\"guaranteedStop\":false," + "\"currencyCode\":\"USD\"," + "\"forceOpen\":true" + "}";
+        String body = "{" + "\"epic\":\"" + currentEpic + "\"," + "\"direction\":\"" + direction + "\"," + "\"size\":" + size + "," + "\"orderType\":\"MARKET\"," + "\"guaranteedStop\":false," + "\"currencyCode\":\"USD\"," + "\"forceOpen\":false" + "}";
 
         return post("/positions", body);
     }
