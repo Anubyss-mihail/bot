@@ -86,11 +86,16 @@ public class Server {
                                 continue;
                             }
 
+
                             String openResult = openPosition(side, size);
 
-                            if (openResult == null || openResult.isBlank()) {
+                            System.out.println("OPEN RESULT: " + openResult);
+                            currentSignal = "OPEN RESULT: " + openResult;
 
-                                currentSignal = "EROARE DESCHIDERE POZIȚIE";
+
+                            if (openResult == null || openResult.isBlank() || !openResult.contains("dealReference")) {
+
+                                currentSignal = "EROARE OPEN: " + openResult;
 
                                 Thread.sleep(10000);
 
@@ -100,7 +105,7 @@ public class Server {
 
                             while (isBotRunning) {
 
-                                currentPnL = getPnL();
+                                currentPnL = getTotalPnLAllPositions();
 
                                 double pnl = Double.parseDouble(currentPnL);
 
@@ -125,6 +130,7 @@ public class Server {
                                 Thread.sleep(3000);
                             }
                         }
+
 
                     } catch (Exception e) {
                         isBotRunning = false;
@@ -173,7 +179,7 @@ public class Server {
             try {
                 ensureLogin();
                 currentPrice = getCurrentPrice();
-                currentPnL = getPnL();
+                currentPnL = getTotalPnLAllPositions();
             } catch (Exception ignored) {
             }
 
@@ -204,8 +210,27 @@ public class Server {
         server.createContext("/analyze", exchange -> {
             try {
                 ensureLogin();
-                String signal = analyzeMarket();
-                send(exchange, 200, "Signal: " + signal + "\nPrice: " + currentPrice);
+
+                String oldEpic = currentEpic;
+
+                StringBuilder result = new StringBuilder();
+
+                for (String epic : EPICS) {
+
+                    currentEpic = epic;
+
+                    String signal = analyzeMarket();
+
+                    result.append(epic)
+                            .append(" -> ")
+                            .append(signal)
+                            .append("\n");
+                }
+
+                currentEpic = oldEpic;
+
+                send(exchange, 200, result.toString());
+
             } catch (Exception e) {
                 sendSafe(exchange, 500, "ANALYZE ERROR: " + e.getMessage());
             }
@@ -488,28 +513,19 @@ public class Server {
         return formatPlatformPrice(price);
     }
 
-    private static String getPnL() throws Exception {
+    private static String getTotalPnLAllPositions() throws Exception {
         String positions = get("/positions");
 
-        int epicIndex = positions.indexOf("\"epic\":\"" + currentEpic + "\"");
+        Pattern pattern = Pattern.compile("\"upl\"\\s*:\\s*(-?[0-9]+\\.?[0-9]*)");
+        Matcher matcher = pattern.matcher(positions);
 
-        if (epicIndex == -1) {
-            return "0.00";
+        double totalPnl = 0.0;
+
+        while (matcher.find()) {
+            totalPnl += Double.parseDouble(matcher.group(1));
         }
 
-        String beforeEpic = positions.substring(0, epicIndex);
-
-        int positionStart = beforeEpic.lastIndexOf("\"position\"");
-
-        if (positionStart == -1) {
-            return "0.00";
-        }
-
-        String positionBlock = positions.substring(positionStart, epicIndex);
-
-        double pnl = extractJsonNumber(positionBlock, "upl");
-
-        return format(pnl);
+        return format(totalPnl);
     }
 
 
