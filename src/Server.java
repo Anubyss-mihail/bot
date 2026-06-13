@@ -17,16 +17,24 @@ public class Server {
     private static final String API_KEY = "vT415Pqw6MXxwZFo";
     private static final String EMAIL = "anubyssanubyss@gmail.com";
     private static final String API_PASSWORD = "Moldova1@.";
-    private static final double DEFAULT_SIZE = 0.50;
+    private static double getSizeForEpic(String epic) {
+        if (epic.equals("BTCUSD")) return 0.01;
+        if (epic.equals("ETHUSD")) return 0.02;
+        if (epic.equals("SOLUSD")) return 9.00;
+        if (epic.equals("XRPUSD")) return 600;
+        if (epic.equals("GOLD")) return 0.50;
+
+        return 0.01;
+    }
     private static final String[] EPICS = {
-            "GOLD",
             "BTCUSD",
             "ETHUSD",
             "XRPUSD",
-            "SOLUSD"
+            "SOLUSD",
+            "GOLD"
     };
 
-    private static String currentEpic = "GOLD";
+    private static String currentEpic = "BTCUSD";
     private static String CST = "";
     private static String SECURITY_TOKEN = "";
 
@@ -54,7 +62,7 @@ public class Server {
 
                 new Thread(() -> {
                     try {
-                        double size = DEFAULT_SIZE;
+
 
                         while (isBotRunning) {
 
@@ -73,6 +81,8 @@ public class Server {
                                     break;
                                 }
                             }
+
+                            double size = getSizeForEpic(currentEpic);
 
                             if (side.equals("Așteptare")) {
                                 continue;
@@ -159,7 +169,7 @@ public class Server {
                 ensureLogin();
 
                 String positions = get("/positions");
-                String realDealId = getDealIdForCurrentEpic(positions);
+                String realDealId = getAnyDealIdInEpics(positions);
 
                 if (realDealId == null || realDealId.isBlank()) {
                     isBotRunning = false;
@@ -222,6 +232,38 @@ public class Server {
             }
         });
 
+        server.createContext("/analyze-fast", exchange -> {
+            try {
+                ensureLogin();
+
+                String oldEpic = currentEpic;
+                StringBuilder result = new StringBuilder();
+
+                for (String epic : EPICS) {
+                    currentEpic = epic;
+
+                    String price = getCurrentPrice();
+                    String signal = analyzeMarket();
+
+                    result.append(epic)
+                            .append(" = ")
+                            .append(price)
+                            .append(" -> ")
+                            .append(signal)
+                            .append(" | ")
+                            .append(currentSignal)
+                            .append("\n");
+                }
+
+                currentEpic = oldEpic;
+
+                send(exchange, 200, result.toString());
+
+            } catch (Exception e) {
+                sendSafe(exchange, 300, "ANALYZE FAST ERROR: " + e.getMessage());
+            }
+        });
+
         server.createContext("/analyze", exchange -> {
             try {
                 ensureLogin();
@@ -258,33 +300,31 @@ public class Server {
 
     private static String analyzeMarket() throws Exception {
 
-        double[][] candles = getCandles("MINUTE_5", 100);
+        double[][] candles = getCandles("MINUTE_5", 51);
 
-        double emaFast = calculateEMA(candles, 26);
-        double emaSlow = calculateEMA(candles, 61);
+        double emaFast = calculateEMA(candles, 25);
+        double emaSlow = calculateEMA(candles, 51);
 
-        double rsi = calculateRSI(candles, 26);
-        double adx = calculateADX(candles, 26);
-        double atr = calculateATR(candles, 26);
+        double rsi = calculateRSI(candles, 25);
+        double adx = calculateADX(candles, 25);
+        double atr = calculateATR(candles, 25);
 
-        String structure = analyzeMarketStructure(candles);
 
         currentSignal = "EMA=" + format(emaFast - emaSlow)
                 + " RSI=" + format(rsi)
                 + " ADX=" + format(adx)
-                + " ATR=" + format(atr)
-                + " STRUCT=" + structure;
+                + " ATR=" + format(atr);
 
-        if (emaFast > emaSlow && rsi > 55 && adx > 20 && atr > 0.30 && structure.equals("SUS")) {
-            currentSignal = "BUY: EMA + RSI + ADX + ATR + STRUCTURĂ";
+        if (emaFast > emaSlow && rsi > 55 && adx > 20 && atr > 0.30) {
+            currentSignal = "BUY: EMA + RSI + ADX + ATR";
             return "BUY";
 
-        } else if (emaFast < emaSlow && rsi < 45 && adx > 20 && atr > 0.30 && structure.equals("JOS")) {
-            currentSignal = "SELL: EMA + RSI + ADX + ATR + STRUCTURĂ";
+        } else if (emaFast < emaSlow && rsi < 45 && adx > 20 && atr > 0.30) {
+            currentSignal = "SELL: EMA + RSI + ADX + ATR";
             return "SELL";
 
         } else {
-            currentSignal = "AȘTEPTARE: EMA/RSI/ADX/ATR/STRUCTURĂ";
+            currentSignal = "AȘTEPTARE: EMA/RSI/ADX/ATR";
             return "Așteptare";
         }
     }
@@ -488,30 +528,6 @@ public class Server {
     }
 
 
-    private static String analyzeMarketStructure(double[][] candles) {
-
-        if (candles.length < 6) {
-            return "Așteptare";
-        }
-
-        double high1 = candles[candles.length - 6][0];
-        double high2 = candles[candles.length - 4][0];
-        double high3 = candles[candles.length - 2][0];
-
-        double low1 = candles[candles.length - 6][1];
-        double low2 = candles[candles.length - 4][1];
-        double low3 = candles[candles.length - 2][1];
-
-        if (high3 > high2 && high2 > high1 && low3 > low2 && low2 > low1) {
-            return "SUS";
-        }
-
-        if (high3 < high2 && high2 < high1 && low3 < low2 && low2 < low1) {
-            return "JOS";
-        }
-
-        return "Așteptare";
-    }
 
 
     private static String getCurrentPrice() throws Exception {
@@ -567,20 +583,7 @@ public class Server {
         return pattern.matcher(json);
     }
 
-    private static double extractJsonNumber(String json, String key) {
-        try {
-            String pattern = "\"" + key + "\"\\s*:\\s*(-?[0-9]+\\.?[0-9]*)";
-            Matcher matcher = Pattern.compile(pattern).matcher(json);
 
-            if (matcher.find()) {
-                return Double.parseDouble(matcher.group(1));
-            }
-
-            return 0.0;
-        } catch (Exception e) {
-            return 0.0;
-        }
-    }
 
     private static String extractJsonValue(String json, String key) {
         String pattern = "\"" + key + "\":\"";
@@ -598,6 +601,24 @@ public class Server {
 
     private static String confirmDeal(String dealReference) throws Exception {
         return get("/confirms/" + URLEncoder.encode(dealReference, StandardCharsets.UTF_8));
+    }
+
+    private static String getAnyDealIdInEpics(String positions) {
+        String oldEpic = currentEpic;
+
+        for (String epic : EPICS) {
+            currentEpic = epic;
+
+            String dealId = getDealIdForCurrentEpic(positions);
+
+            if (dealId != null && !dealId.isBlank()) {
+                currentEpic = oldEpic;
+                return dealId;
+            }
+        }
+
+        currentEpic = oldEpic;
+        return null;
     }
 
     private static String getDealIdForCurrentEpic(String positions) {
