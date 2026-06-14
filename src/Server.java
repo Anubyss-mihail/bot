@@ -18,23 +18,23 @@ public class Server {
     private static final String EMAIL = "anubyssanubyss@gmail.com";
     private static final String API_PASSWORD = "Moldova1@.";
     private static double getSizeForEpic(String epic) {
-        if (epic.equals("BTCUSD")) return 0.01;
-        if (epic.equals("ETHUSD")) return 0.02;
-        if (epic.equals("SOLUSD")) return 9.00;
-        if (epic.equals("XRPUSD")) return 600;
         if (epic.equals("GOLD")) return 0.50;
+        if (epic.equals("BTCUSD")) return 0.01;
+        if (epic.equals("ETHUSD")) return 0.40;
+        if (epic.equals("XRPUSD")) return 600;
+        if (epic.equals("SOLUSD")) return 9.00;
 
         return 0.01;
     }
     private static final String[] EPICS = {
+            "GOLD",
             "BTCUSD",
             "ETHUSD",
             "XRPUSD",
-            "SOLUSD",
-            "GOLD"
+            "SOLUSD"
     };
 
-    private static String currentEpic = "BTCUSD";
+    private static String currentEpic = "GOLD";
     private static String CST = "";
     private static String SECURITY_TOKEN = "";
 
@@ -42,6 +42,7 @@ public class Server {
     private static String currentSignal = "Așteptare";
     private static String currentPrice = "--";
     private static String currentPnL = "0.00";
+    private static double currentScore = 0.0;
 
     public static void main(String[] args) throws Exception {
 
@@ -68,25 +69,35 @@ public class Server {
 
                             long wait = millisUntilNext5MinuteCandleClose();
 
-                            Thread.sleep(wait);
+                            Thread.sleep(5000);
 
                             String side = "Așteptare";
+                            String bestEpic = currentEpic;
+                            String bestSide = "Așteptare";
+                            double bestScore = 0.0;
 
                             for (String epic : EPICS) {
                                 currentEpic = epic;
 
-                                side = analyzeMarket();
+                                String signal = analyzeMarket();
+                                double score = currentScore;
 
-                                if (!side.equals("Așteptare")) {
-                                    break;
+                                if (!signal.equals("Așteptare") && score > bestScore) {
+                                    bestScore = score;
+                                    bestEpic = epic;
+                                    bestSide = signal;
                                 }
-                            }
 
-                            double size = getSizeForEpic(currentEpic);
-
-                            if (side.equals("Așteptare")) {
-                                continue;
                             }
+                            currentEpic = bestEpic;
+                            side = bestSide;
+
+
+                        double size = getSizeForEpic(currentEpic);
+
+                        if (side.equals("Așteptare")) {
+                            continue;
+                        }
 
                             String preOpenPositions = get("/positions");
 
@@ -99,7 +110,7 @@ public class Server {
 
                             String openResult = openPosition(side, size);
 
-                            System.out.println("OPEN RESULT: " + openResult);
+                            //System.out.println("OPEN RESULT: " + openResult);
 
                             if (openResult == null || openResult.isBlank() || !openResult.contains("dealReference")) {
                                 currentSignal = "EROARE OPEN: " + openResult;
@@ -110,7 +121,7 @@ public class Server {
                             String dealReference = extractJsonValue(openResult, "dealReference");
                             String confirmResult = confirmDeal(dealReference);
 
-                            System.out.println("CONFIRM RESULT: " + confirmResult);
+                           //System.out.println("CONFIRM RESULT: " + confirmResult);
 
                             if (!confirmResult.contains("ACCEPTED")) {
                                 currentSignal = "ORDIN RESPINS: " + confirmResult;
@@ -232,6 +243,7 @@ public class Server {
             }
         });
 
+
         server.createContext("/analyze-fast", exchange -> {
             try {
                 ensureLogin();
@@ -263,6 +275,8 @@ public class Server {
                 sendSafe(exchange, 300, "ANALYZE FAST ERROR: " + e.getMessage());
             }
         });
+
+
 
         server.createContext("/analyze", exchange -> {
             try {
@@ -298,6 +312,9 @@ public class Server {
         System.out.println("Server pornit: http://localhost:8080");
     }
 
+
+
+    // analiza petii
     private static String analyzeMarket() throws Exception {
 
         double[][] candles = getCandles("MINUTE_5", 51);
@@ -308,6 +325,17 @@ public class Server {
         double rsi = calculateRSI(candles, 25);
         double adx = calculateADX(candles, 25);
         double atr = calculateATR(candles, 25);
+        double lastPrice = candles[candles.length - 1][2];
+        double atrPercent = (atr / lastPrice) * 100.0;
+        currentScore = Math.abs(emaFast - emaSlow) + rsi + adx + atr;
+
+        System.out.println(
+                currentEpic
+                        + " EMA=" + format(emaFast - emaSlow)
+                        + " RSI=" + format(rsi)
+                        + " ADX=" + format(adx)
+                        + " ATR=" + format(atr)
+        );
 
 
         currentSignal = "EMA=" + format(emaFast - emaSlow)
@@ -315,20 +343,23 @@ public class Server {
                 + " ADX=" + format(adx)
                 + " ATR=" + format(atr);
 
-        if (emaFast > emaSlow && rsi > 55 && adx > 20 && atr > 0.30) {
-            currentSignal = "BUY: EMA + RSI + ADX + ATR";
+        if (emaFast > emaSlow && rsi > 55 && adx > 20 && atrPercent > 0.10) {
+            currentSignal = "BUY: EMA + RSI + ADX + ATR%";
             return "BUY";
 
-        } else if (emaFast < emaSlow && rsi < 45 && adx > 20 && atr > 0.30) {
-            currentSignal = "SELL: EMA + RSI + ADX + ATR";
+        } else if (emaFast < emaSlow && rsi < 45 && adx > 20 && atrPercent > 0.10) {
+            currentSignal = "SELL: EMA + RSI + ADX + ATR%";
             return "SELL";
 
-        } else {
-            currentSignal = "AȘTEPTARE: EMA/RSI/ADX/ATR";
+       } else {
+            currentSignal = "AȘTEPTARE: EMA/RSI/ADX/ATR%";
             return "Așteptare";
+
         }
     }
 
+
+    // calcul la indecator ema
     private static double calculateEMA(double[][] candles, int period) {
 
         double ema = 0.0;
@@ -349,6 +380,8 @@ public class Server {
         return ema;
     }
 
+
+    // calcul la  indecator rsi
     private static double calculateRSI(double[][] candles, int period) {
 
         if (candles.length <= period) {
@@ -390,33 +423,11 @@ public class Server {
         return 100.0 - (100.0 / (1.0 + rs));
     }
 
-    private static double calculateATR(double[][] candles, int period) {
 
-        if (candles.length <= period) {
-            return 0.0;
-        }
-
-        double totalTR = 0.0;
-
-        for (int i = 1; i < candles.length; i++) {
-            double high = candles[i][0];
-            double low = candles[i][1];
-            double prevClose = candles[i - 1][2];
-
-            double tr = Math.max(
-                    high - low,
-                    Math.max(Math.abs(high - prevClose), Math.abs(low - prevClose))
-            );
-
-            totalTR += tr;
-        }
-
-        return totalTR / (candles.length - 1);
-    }
-
+    // calcul la indecator adx
     private static double calculateADX(double[][] candles, int period) {
 
-        if (candles.length <= period * 2) {
+        if (candles.length < period * 2) {
             return 0.0;
         }
 
@@ -501,6 +512,31 @@ public class Server {
         }
 
         return adx;
+    }
+
+    // calcul la indecator atr
+    private static double calculateATR(double[][] candles, int period) {
+
+        if (candles.length <= period) {
+            return 0.0;
+        }
+
+        double totalTR = 0.0;
+
+        for (int i = 1; i < candles.length; i++) {
+            double high = candles[i][0];
+            double low = candles[i][1];
+            double prevClose = candles[i - 1][2];
+
+            double tr = Math.max(
+                    high - low,
+                    Math.max(Math.abs(high - prevClose), Math.abs(low - prevClose))
+            );
+
+            totalTR += tr;
+        }
+
+        return totalTR / (candles.length - 1);
     }
 
     private static double[][] getCandles(String resolution, int max) throws Exception {
