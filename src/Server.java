@@ -69,7 +69,7 @@ public class Server {
 
                             long wait = millisUntilNext5MinuteCandleClose();
 
-                            Thread.sleep(5000);
+                            Thread.sleep(wait);
 
                             String side = "Așteptare";
                             String bestEpic = currentEpic;
