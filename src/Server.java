@@ -343,11 +343,11 @@ public class Server {
                 + " ADX=" + format(adx)
                 + " ATR=" + format(atr);
 
-        if (emaFast > emaSlow && rsi > 55 && adx > 20 && atrPercent > 0.10) {
+        if (emaFast > emaSlow && rsi > 60 && adx > 25 && atrPercent > 0.10) {
             currentSignal = "BUY: EMA + RSI + ADX + ATR%";
             return "BUY";
 
-        } else if (emaFast < emaSlow && rsi < 45 && adx > 20 && atrPercent > 0.10) {
+        } else if (emaFast < emaSlow && rsi < 40 && adx > 25 && atrPercent > 0.10) {
             currentSignal = "SELL: EMA + RSI + ADX + ATR%";
             return "SELL";
 
