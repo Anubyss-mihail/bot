@@ -142,19 +142,17 @@ public class Server {
 
                                     String positions = get("/positions");
 
-                                    String realDealId = getDealIdForCurrentEpic(positions);
+                                    String realDealId = getAnyDealIdInEpics(positions);
 
                                     if (realDealId != null && !realDealId.isBlank()) {
 
                                         closePosition(realDealId);
-
                                         currentSignal = "Așteptare";
 
                                         break;
 
                                     }
                                 }
-
 
                                 Thread.sleep(3000);
                             }
@@ -202,17 +200,39 @@ public class Server {
                 isBotRunning = false;
                 sendSafe(exchange, 500, "ERROR: " + e.getMessage());
             }
+
         });
 
         server.createContext("/status", exchange -> {
             try {
                 ensureLogin();
+
+                String positions = get("/positions");
+                String openEpic = getOpenEpicInEpics(positions);
+
+                if (openEpic != null) {
+                    currentEpic = openEpic;
+                    currentSignal = "POZIȚIE DESCHISĂ DUPĂ RESTART";
+                } else if (!isBotRunning) {
+                    currentSignal = "Așteptare";
+                    currentPnL = "0.00";
+                }
+
                 currentPrice = getCurrentPrice();
                 currentPnL = getTotalPnLAllPositions();
+
             } catch (Exception ignored) {
             }
 
-            String json = "{" + "\"status\":\"" + (isBotRunning ? "RUNNING" : "STOP") + "\"," + "\"server\":\"" + (isBotRunning ? "CONECTAT" : "DECONECTAT") + "\"," + "\"platform\":\"Capital.com\"," + "\"symbol\":\"" + currentEpic + "\"," + "\"price\":\"" + currentPrice + "\"," + "\"signal\":\"" + currentSignal + "\"," + "\"pnl\":\"" + currentPnL + "\"" + "}";
+            String json = "{"
+                    + "\"status\":\"" + (isBotRunning ? "RUNNING" : "STOP") + "\","
+                    + "\"server\":\"" + (isBotRunning ? "CONECTAT" : "DECONECTAT") + "\","
+                    + "\"platform\":\"Capital.com\","
+                    + "\"symbol\":\"" + currentEpic + "\","
+                    + "\"price\":\"" + currentPrice + "\","
+                    + "\"signal\":\"" + currentSignal + "\","
+                    + "\"pnl\":\"" + currentPnL + "\""
+                    + "}";
 
             sendJson(exchange, 200, json);
         });
@@ -317,31 +337,26 @@ public class Server {
     // analiza petii
     private static String analyzeMarket() throws Exception {
 
-        double[][] candles = getCandles("MINUTE_5", 51);
+        double[][] candles = getCandles("MINUTE_5", 61);
 
-        double emaFast = calculateEMA(candles, 25);
-        double emaSlow = calculateEMA(candles, 51);
+        double emaFast = calculateEMA(candles, 30);
+        double emaSlow = calculateEMA(candles, 61);
 
-        double rsi = calculateRSI(candles, 25);
-        double adx = calculateADX(candles, 25);
-        double atr = calculateATR(candles, 25);
+        double rsi = calculateRSI(candles, 39);
+        double adx = calculateADX(candles, 30);
+        double atr = calculateATR(candles, 30);
         double lastPrice = candles[candles.length - 1][2];
         double atrPercent = (atr / lastPrice) * 100.0;
         currentScore = Math.abs(emaFast - emaSlow) + rsi + adx + atr;
 
-        System.out.println(
-                currentEpic
-                        + " EMA=" + format(emaFast - emaSlow)
-                        + " RSI=" + format(rsi)
-                        + " ADX=" + format(adx)
-                        + " ATR=" + format(atr)
-        );
+       // System.out.println(
+             //  currentEpic
+                       // + " EMA=" + format(emaFast - emaSlow)
+                      //  + " RSI=" + format(rsi)
+                       // + " ADX=" + format(adx)
+                      //  + " ATR=" + format(atr)
+     //  );
 
-
-        currentSignal = "EMA=" + format(emaFast - emaSlow)
-                + " RSI=" + format(rsi)
-                + " ADX=" + format(adx)
-                + " ATR=" + format(atr);
 
         if (emaFast > emaSlow && rsi > 60 && adx > 25 && atrPercent > 0.10) {
             currentSignal = "BUY: EMA + RSI + ADX + ATR%";
@@ -351,10 +366,14 @@ public class Server {
             currentSignal = "SELL: EMA + RSI + ADX + ATR%";
             return "SELL";
 
-       } else {
-            currentSignal = "AȘTEPTARE: EMA/RSI/ADX/ATR%";
-            return "Așteptare";
+        } else {
+            currentSignal =
+                    "EMA=" + format(emaFast - emaSlow)
+                            + " RSI=" + format(rsi)
+                            + " ADX=" + format(adx)
+                            + " ATR%=" + format(atrPercent);
 
+            return "Așteptare";
         }
     }
 
@@ -654,6 +673,16 @@ public class Server {
         }
 
         currentEpic = oldEpic;
+        return null;
+    }
+
+    private static String getOpenEpicInEpics(String positions) {
+        for (String epic : EPICS) {
+            if (positions.contains("\"epic\":\"" + epic + "\"")) {
+                return epic;
+            }
+        }
+
         return null;
     }
 
