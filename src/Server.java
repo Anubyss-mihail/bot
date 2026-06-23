@@ -337,7 +337,7 @@ public class Server {
     private static String analyzeMarket() throws Exception {
         currentScore = 0.0;
 
-        double[][] candles = getCandles("MINUTE_5", 100);
+        double[][] candles = getCandles("MINUTE_5", 101);
 
         if (candles.length < 100) {
             currentSignal = "LUMÂNĂRI INSUFICIENTE: " + candles.length;
