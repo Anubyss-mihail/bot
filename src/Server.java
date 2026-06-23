@@ -7,6 +7,7 @@ import java.net.InetSocketAddress;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -14,18 +15,10 @@ public class Server {
 
     private static final String BASE_URL = "https://demo-api-capital.backend-capital.com/api/v1";
 
-    private static final String API_KEY = "vT415Pqw6MXxwZFo";
+    private static final String API_KEY = "jT7cyanEmBLvvMNI";
     private static final String EMAIL = "anubyssanubyss@gmail.com";
-    private static final String API_PASSWORD = "Moldova1@.";
-    private static double getSizeForEpic(String epic) {
-        if (epic.equals("GOLD")) return 0.50;
-        if (epic.equals("BTCUSD")) return 0.01;
-        if (epic.equals("ETHUSD")) return 0.40;
-        if (epic.equals("XRPUSD")) return 600;
-        if (epic.equals("SOLUSD")) return 9.00;
+    private static final String API_PASSWORD = "Moldova@1.";
 
-        return 0.01;
-    }
     private static final String[] EPICS = {
             "GOLD",
             "BTCUSD",
@@ -38,7 +31,8 @@ public class Server {
     private static String CST = "";
     private static String SECURITY_TOKEN = "";
 
-    private static boolean isBotRunning = false;
+    private static volatile boolean isBotRunning = false;
+
     private static String currentSignal = "Așteptare";
     private static String currentPrice = "--";
     private static String currentPnL = "0.00";
@@ -48,7 +42,9 @@ public class Server {
 
         HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
 
-        server.createContext("/", exchange -> send(exchange, 200, "Server Capital.com API OK"));
+        server.createContext("/", exchange ->
+                send(exchange, 200, "Server Capital.com API OK")
+        );
 
         server.createContext("/start", exchange -> {
             try {
@@ -63,15 +59,26 @@ public class Server {
 
                 new Thread(() -> {
                     try {
-
-
                         while (isBotRunning) {
 
-                            long wait = millisUntilNext5MinuteCandleClose();
+                            // Dacă există poziție deja deschisă după restart, o monitorizăm.
+                            String existingPositions = get("/positions");
+                            String openEpic = getOpenEpicInEpics(existingPositions);
 
+                            if (openEpic != null) {
+                                currentEpic = openEpic;
+                                currentSignal = "MONITORIZEZ POZIȚIA " + currentEpic;
+                                monitorOpenPosition();
+                                continue;
+                            }
+
+                            // Așteaptă închiderea lumânării M5.
+                            long wait = millisUntilNext5MinuteCandleClose();
+                            currentSignal = "Aștept închiderea lumânării M5...";
                             Thread.sleep(wait);
 
-                            String side = "Așteptare";
+                            currentSignal = "Analizez piața...";
+
                             String bestEpic = currentEpic;
                             String bestSide = "Așteptare";
                             double bestScore = 0.0;
@@ -87,30 +94,25 @@ public class Server {
                                     bestEpic = epic;
                                     bestSide = signal;
                                 }
-
                             }
+
                             currentEpic = bestEpic;
-                            side = bestSide;
 
-
-                        double size = getSizeForEpic(currentEpic);
-
-                        if (side.equals("Așteptare")) {
-                            continue;
-                        }
+                            if (bestSide.equals("Așteptare")) {
+                                continue;
+                            }
 
                             String preOpenPositions = get("/positions");
 
                             if (hasAnyOpenPositionInEpics(preOpenPositions)) {
-                                currentSignal = "EXISTĂ DEJA O POZIȚIE DESCHISĂ - NU DESCHID ALTA";
-                                Thread.sleep(3000);
+                                currentSignal = "EXISTĂ DEJA O POZIȚIE DESCHISĂ - MONITORIZEZ";
+                                monitorOpenPosition();
                                 continue;
                             }
 
+                            double size = getSizeForEpic(currentEpic);
 
-                            String openResult = openPosition(side, size);
-
-                            //System.out.println("OPEN RESULT: " + openResult);
+                            String openResult = openPosition(bestSide, size);
 
                             if (openResult == null || openResult.isBlank() || !openResult.contains("dealReference")) {
                                 currentSignal = "EROARE OPEN: " + openResult;
@@ -121,46 +123,20 @@ public class Server {
                             String dealReference = extractJsonValue(openResult, "dealReference");
                             String confirmResult = confirmDeal(dealReference);
 
-                           //System.out.println("CONFIRM RESULT: " + confirmResult);
-
-                            if (!confirmResult.contains("ACCEPTED")) {
+                            if (confirmResult == null || !confirmResult.contains("ACCEPTED")) {
                                 currentSignal = "ORDIN RESPINS: " + confirmResult;
                                 Thread.sleep(10000);
                                 continue;
                             }
 
-                            currentSignal = side + " CONFIRMAT " + currentEpic;
+                            currentSignal = bestSide + " CONFIRMAT " + currentEpic;
 
-
-                            while (isBotRunning) {
-
-                                currentPnL = getTotalPnLAllPositions();
-
-                                double pnl = Double.parseDouble(currentPnL);
-
-                                if (pnl >= 7.0 || pnl <= -3.0) {
-
-                                    String positions = get("/positions");
-
-                                    String realDealId = getAnyDealIdInEpics(positions);
-
-                                    if (realDealId != null && !realDealId.isBlank()) {
-
-                                        closePosition(realDealId);
-                                        currentSignal = "Așteptare";
-
-                                        break;
-
-                                    }
-                                }
-
-                                Thread.sleep(3000);
-                            }
+                            monitorOpenPosition();
                         }
-
 
                     } catch (Exception e) {
                         isBotRunning = false;
+                        currentSignal = "AUTO START ERROR: " + e.getMessage();
                         System.out.println("AUTO START ERROR: " + e.getMessage());
                     }
                 }).start();
@@ -200,7 +176,6 @@ public class Server {
                 isBotRunning = false;
                 sendSafe(exchange, 500, "ERROR: " + e.getMessage());
             }
-
         });
 
         server.createContext("/status", exchange -> {
@@ -212,7 +187,12 @@ public class Server {
 
                 if (openEpic != null) {
                     currentEpic = openEpic;
-                    currentSignal = "POZIȚIE DESCHISĂ DUPĂ RESTART";
+
+                    if (!isBotRunning) {
+                        currentSignal = "POZIȚIE DESCHISĂ DUPĂ RESTART";
+                    } else if (currentSignal.equals("POZIȚIE DESCHISĂ DUPĂ RESTART")) {
+                        currentSignal = "MONITORIZEZ POZIȚIA " + currentEpic;
+                    }
                 } else if (!isBotRunning) {
                     currentSignal = "Așteptare";
                     currentPnL = "0.00";
@@ -221,7 +201,8 @@ public class Server {
                 currentPrice = getCurrentPrice();
                 currentPnL = getTotalPnLAllPositions();
 
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                currentSignal = "STATUS ERROR: " + e.getMessage();
             }
 
             String json = "{"
@@ -241,9 +222,8 @@ public class Server {
             try {
                 ensureLogin();
 
-                StringBuilder result = new StringBuilder();
-
                 String oldEpic = currentEpic;
+                StringBuilder result = new StringBuilder();
 
                 for (String epic : EPICS) {
                     currentEpic = epic;
@@ -262,7 +242,6 @@ public class Server {
                 sendSafe(exchange, 500, "PRICE ERROR: " + e.getMessage());
             }
         });
-
 
         server.createContext("/analyze-fast", exchange -> {
             try {
@@ -292,22 +271,18 @@ public class Server {
                 send(exchange, 200, result.toString());
 
             } catch (Exception e) {
-                sendSafe(exchange, 300, "ANALYZE FAST ERROR: " + e.getMessage());
+                sendSafe(exchange, 500, "ANALYZE FAST ERROR: " + e.getMessage());
             }
         });
-
-
 
         server.createContext("/analyze", exchange -> {
             try {
                 ensureLogin();
 
                 String oldEpic = currentEpic;
-
                 StringBuilder result = new StringBuilder();
 
                 for (String epic : EPICS) {
-
                     currentEpic = epic;
 
                     String signal = analyzeMarket();
@@ -315,6 +290,8 @@ public class Server {
                     result.append(epic)
                             .append(" -> ")
                             .append(signal)
+                            .append(" | ")
+                            .append(currentSignal)
                             .append("\n");
                 }
 
@@ -332,12 +309,40 @@ public class Server {
         System.out.println("Server pornit: http://localhost:8080");
     }
 
+    private static void monitorOpenPosition() throws Exception {
+        while (isBotRunning) {
+            currentPnL = getTotalPnLAllPositions();
 
+            double pnl = Double.parseDouble(currentPnL);
 
-    // analiza petii
+            if (pnl >= 7.0 || pnl <= -3.0) {
+                String positions = get("/positions");
+                String realDealId = getAnyDealIdInEpics(positions);
+
+                if (realDealId != null && !realDealId.isBlank()) {
+                    String closeResult = closePosition(realDealId);
+
+                    currentSignal = "POZIȚIE ÎNCHISĂ: " + closeResult;
+                    currentPnL = "0.00";
+
+                    Thread.sleep(3000);
+                    break;
+                }
+            }
+
+            Thread.sleep(3000);
+        }
+    }
+
     private static String analyzeMarket() throws Exception {
+        currentScore = 0.0;
 
-        double[][] candles = getCandles("MINUTE_5", 61);
+        double[][] candles = getCandles("MINUTE_5", 100);
+
+        if (candles.length < 100) {
+            currentSignal = "LUMÂNĂRI INSUFICIENTE: " + candles.length;
+            return "Așteptare";
+        }
 
         double emaFast = calculateEMA(candles, 30);
         double emaSlow = calculateEMA(candles, 61);
@@ -345,24 +350,25 @@ public class Server {
         double rsi = calculateRSI(candles, 39);
         double adx = calculateADX(candles, 30);
         double atr = calculateATR(candles, 30);
+
         double lastPrice = candles[candles.length - 1][2];
+
+        if (lastPrice <= 0) {
+            currentSignal = "PREȚ INVALID";
+            return "Așteptare";
+        }
+
         double atrPercent = (atr / lastPrice) * 100.0;
-        currentScore = Math.abs(emaFast - emaSlow) + rsi + adx + atr;
 
-       // System.out.println(
-             //  currentEpic
-                       // + " EMA=" + format(emaFast - emaSlow)
-                      //  + " RSI=" + format(rsi)
-                       // + " ADX=" + format(adx)
-                      //  + " ATR=" + format(atr)
-     //  );
+        double emaDistance = Math.abs(emaFast - emaSlow);
 
-
-        if (emaFast > emaSlow && rsi > 60 && adx > 25 && atrPercent > 0.10) {
+        if (emaFast > emaSlow && rsi > 65 && adx > 30 && atrPercent > 0.10) {
+            currentScore = emaDistance + adx + atrPercent;
             currentSignal = "BUY: EMA + RSI + ADX + ATR%";
             return "BUY";
 
-        } else if (emaFast < emaSlow && rsi < 40 && adx > 25 && atrPercent > 0.10) {
+        } else if (emaFast < emaSlow && rsi < 35 && adx > 30 && atrPercent > 0.10) {
+            currentScore = emaDistance + adx + atrPercent;
             currentSignal = "SELL: EMA + RSI + ADX + ATR%";
             return "SELL";
 
@@ -377,10 +383,7 @@ public class Server {
         }
     }
 
-
-    // calcul la indecator ema
     private static double calculateEMA(double[][] candles, int period) {
-
         double ema = 0.0;
         double multiplier = 2.0 / (period + 1);
         boolean first = true;
@@ -399,10 +402,7 @@ public class Server {
         return ema;
     }
 
-
-    // calcul la  indecator rsi
     private static double calculateRSI(double[][] candles, int period) {
-
         if (candles.length <= period) {
             return 50.0;
         }
@@ -442,10 +442,7 @@ public class Server {
         return 100.0 - (100.0 / (1.0 + rs));
     }
 
-
-    // calcul la indecator adx
     private static double calculateADX(double[][] candles, int period) {
-
         if (candles.length < period * 2) {
             return 0.0;
         }
@@ -533,9 +530,7 @@ public class Server {
         return adx;
     }
 
-    // calcul la indecator atr
     private static double calculateATR(double[][] candles, int period) {
-
         if (candles.length <= period) {
             return 0.0;
         }
@@ -569,7 +564,7 @@ public class Server {
         );
 
         Matcher matcher = pattern.matcher(response);
-        java.util.ArrayList<double[]> candles = new java.util.ArrayList<>();
+        ArrayList<double[]> candles = new ArrayList<>();
 
         while (matcher.find()) {
             double high = (Double.parseDouble(matcher.group(1)) + Double.parseDouble(matcher.group(2))) / 2.0;
@@ -582,14 +577,9 @@ public class Server {
         return candles.toArray(new double[0][]);
     }
 
-
-
-
     private static String getCurrentPrice() throws Exception {
         String epicEncoded = URLEncoder.encode(currentEpic, StandardCharsets.UTF_8);
         String response = get("/prices/" + epicEncoded + "?resolution=MINUTE&max=2");
-
-
 
         double price = extractLastCloseMid(response);
 
@@ -615,8 +605,6 @@ public class Server {
         return format(totalPnl);
     }
 
-
-
     private static double extractLastCloseMid(String json) {
         Matcher matcher = closePriceMatcher(json);
         double last = 0.0;
@@ -630,15 +618,13 @@ public class Server {
         return last;
     }
 
-
-
     private static Matcher closePriceMatcher(String json) {
-        Pattern pattern = Pattern.compile("\"closePrice\"\\s*:\\s*\\{\\s*\"bid\"\\s*:\\s*([0-9.\\-]+)\\s*,\\s*\"ask\"\\s*:\\s*([0-9.\\-]+)");
+        Pattern pattern = Pattern.compile(
+                "\"closePrice\"\\s*:\\s*\\{\\s*\"bid\"\\s*:\\s*([0-9.\\-]+)\\s*,\\s*\"ask\"\\s*:\\s*([0-9.\\-]+)"
+        );
 
         return pattern.matcher(json);
     }
-
-
 
     private static String extractJsonValue(String json, String key) {
         String pattern = "\"" + key + "\":\"";
@@ -694,7 +680,6 @@ public class Server {
         }
 
         String beforeEpic = positions.substring(0, epicIndex);
-
         int positionStart = beforeEpic.lastIndexOf("\"position\"");
 
         if (positionStart == -1) {
@@ -716,8 +701,22 @@ public class Server {
         return false;
     }
 
+    private static double getSizeForEpic(String epic) {
+        if (epic.equals("GOLD")) return 0.50;
+        if (epic.equals("BTCUSD")) return 0.01;
+        if (epic.equals("ETHUSD")) return 0.40;
+        if (epic.equals("XRPUSD")) return 600.0;
+        if (epic.equals("SOLUSD")) return 9.00;
+
+        return 0.01;
+    }
+
     private static void login() throws Exception {
-        String body = "{" + "\"identifier\":\"" + EMAIL + "\"," + "\"password\":\"" + API_PASSWORD + "\"," + "\"encryptedPassword\":false" + "}";
+        String body = "{"
+                + "\"identifier\":\"" + EMAIL + "\","
+                + "\"password\":\"" + API_PASSWORD + "\","
+                + "\"encryptedPassword\":false"
+                + "}";
 
         HttpURLConnection conn = connection(BASE_URL + "/session", "POST");
 
@@ -748,7 +747,15 @@ public class Server {
     private static String openPosition(String side, double size) throws Exception {
         String direction = side.equals("SELL") ? "SELL" : "BUY";
 
-        String body = "{" + "\"epic\":\"" + currentEpic + "\"," + "\"direction\":\"" + direction + "\"," + "\"size\":" + size + "," + "\"orderType\":\"MARKET\"," + "\"guaranteedStop\":false," + "\"currencyCode\":\"USD\"," + "\"forceOpen\":false" + "}";
+        String body = "{"
+                + "\"epic\":\"" + currentEpic + "\","
+                + "\"direction\":\"" + direction + "\","
+                + "\"size\":" + size + ","
+                + "\"orderType\":\"MARKET\","
+                + "\"guaranteedStop\":false,"
+                + "\"currencyCode\":\"USD\","
+                + "\"forceOpen\":false"
+                + "}";
 
         return post("/positions", body);
     }
@@ -799,13 +806,17 @@ public class Server {
     private static String readResponse(HttpURLConnection conn) throws Exception {
         int code = conn.getResponseCode();
 
-        InputStream stream = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+        InputStream stream = (code >= 200 && code < 300)
+                ? conn.getInputStream()
+                : conn.getErrorStream();
 
         if (stream == null) {
             throw new RuntimeException("HTTP error code: " + code);
         }
 
-        BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8));
+        BufferedReader reader = new BufferedReader(
+                new InputStreamReader(stream, StandardCharsets.UTF_8)
+        );
 
         StringBuilder result = new StringBuilder();
         String line;
@@ -818,7 +829,6 @@ public class Server {
 
         return result.toString();
     }
-
 
     private static String format(double value) {
         return String.format(java.util.Locale.US, "%.4f", value);
@@ -855,17 +865,13 @@ public class Server {
             send(exchange, code, response);
         } catch (IOException ignored) {
         }
-
     }
 
     private static long millisUntilNext5MinuteCandleClose() {
         long now = System.currentTimeMillis();
-
         long fiveMinutes = 5 * 60 * 1000;
-
         long nextClose = ((now / fiveMinutes) + 1) * fiveMinutes;
 
         return nextClose - now + 2000;
     }
-
 }
