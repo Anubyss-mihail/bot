@@ -15,9 +15,9 @@ public class Server {
 
     private static final String BASE_URL = "https://demo-api-capital.backend-capital.com/api/v1";
 
-    private static final String API_KEY = "jT7cyanEmBLvvMNI";
+    private static final String API_KEY = "fq3dOSfe3zSXgy2e";
     private static final String EMAIL = "anubyssanubyss@gmail.com";
-    private static final String API_PASSWORD = "Moldova@1.";
+    private static final String API_PASSWORD = "Moldova123.";
 
     private static final String[] EPICS = {
             "GOLD",
