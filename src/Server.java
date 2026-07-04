@@ -352,6 +352,10 @@ public class Server {
         double atr = calculateATR(candles, 30);
 
         double lastPrice = candles[candles.length - 1][2];
+        double previousClose = candles[candles.length - 2][2];
+
+        boolean candleUp = lastPrice > previousClose;
+        boolean candleDown = lastPrice < previousClose;
 
         if (lastPrice <= 0) {
             currentSignal = "PREȚ INVALID";
@@ -360,15 +364,13 @@ public class Server {
 
         double atrPercent = (atr / lastPrice) * 100.0;
 
-        double emaDistance = Math.abs(emaFast - emaSlow);
+        currentScore = adx + atrPercent + Math.abs(rsi - 50);
 
-        if (emaFast > emaSlow && rsi > 65 && adx > 30 && atrPercent > 0.10) {
-            currentScore = emaDistance + adx + atrPercent;
+        if (emaFast > emaSlow && candleUp && rsi > 65 && adx > 30 && adx < 60 && atrPercent > 0.10) {
             currentSignal = "BUY: EMA + RSI + ADX + ATR%";
             return "BUY";
 
-        } else if (emaFast < emaSlow && rsi < 35 && adx > 30 && atrPercent > 0.10) {
-            currentScore = emaDistance + adx + atrPercent;
+        } else if (emaFast < emaSlow && candleDown && rsi < 35 && adx > 30 && adx < 60 && atrPercent > 0.10) {
             currentSignal = "SELL: EMA + RSI + ADX + ATR%";
             return "SELL";
 
