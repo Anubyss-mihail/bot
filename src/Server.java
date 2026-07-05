@@ -37,6 +37,9 @@ public class Server {
     private static String currentPrice = "--";
     private static String currentPnL = "0.00";
     private static double currentScore = 0.0;
+    private static String currentEvent = "NONE";
+    private static double totalProfit = 0.0;
+    private static double totalLoss = 0.0;
 
     public static void main(String[] args) throws Exception {
 
@@ -130,6 +133,7 @@ public class Server {
                             }
 
                             currentSignal = bestSide + " CONFIRMAT " + currentEpic;
+                            currentEvent = bestSide;
 
                             monitorOpenPosition();
                         }
@@ -212,7 +216,10 @@ public class Server {
                     + "\"symbol\":\"" + currentEpic + "\","
                     + "\"price\":\"" + currentPrice + "\","
                     + "\"signal\":\"" + currentSignal + "\","
-                    + "\"pnl\":\"" + currentPnL + "\""
+                    + "\"pnl\":\"" + currentPnL + "\","
+                    + "\"event\":\"" + currentEvent + "\","
+                    + "\"profit\":\"" + format(totalProfit) + "\","
+                    + "\"loss\":\"" + format(totalLoss) + "\""
                     + "}";
 
             sendJson(exchange, 200, json);
@@ -314,6 +321,11 @@ public class Server {
             currentPnL = getTotalPnLAllPositions();
 
             double pnl = Double.parseDouble(currentPnL);
+            if (pnl > 0) {
+                totalProfit += pnl;
+            } else if (pnl < 0) {
+                totalLoss += Math.abs(pnl);
+            }
 
             if (pnl >= 7.0 || pnl <= -3.0) {
                 String positions = get("/positions");
@@ -323,6 +335,7 @@ public class Server {
                     String closeResult = closePosition(realDealId);
 
                     currentSignal = "POZIȚIE ÎNCHISĂ: " + closeResult;
+                    currentEvent = "CLOSED";
                     currentPnL = "0.00";
 
                     Thread.sleep(3000);
@@ -360,11 +373,6 @@ public class Server {
         double diferenta = Math.abs(emaFast - emaSlow);
 
         currentScore = diferenta;
-
-        System.out.println("EMA30 = " + emaFast);
-        System.out.println("EMA51 = " + emaSlow);
-        System.out.println("Pret = " + lastPrice);
-
 
         if (lastPrice > emaFast && emaFast > emaSlow) {
             currentSignal = "TREND SUS CONFIRMAT";
