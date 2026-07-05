@@ -75,7 +75,7 @@ public class Server {
                             // Așteaptă închiderea lumânării M5.
                             long wait = millisUntilNext5MinuteCandleClose();
                             currentSignal = "Aștept închiderea lumânării M5...";
-                            Thread.sleep(wait);
+                            Thread.sleep(200);
 
                             currentSignal = "Analizez piața...";
 
@@ -345,46 +345,34 @@ public class Server {
         }
 
         double emaFast = calculateEMA(candles, 30);
-        double emaSlow = calculateEMA(candles, 61);
+        double emaSlow = calculateEMA(candles, 51);
 
-        double rsi = calculateRSI(candles, 39);
-        double adx = calculateADX(candles, 30);
-        double atr = calculateATR(candles, 30);
 
         double lastPrice = candles[candles.length - 1][2];
-        double previousClose = candles[candles.length - 2][2];
 
-        boolean candleUp = lastPrice > previousClose;
-        boolean candleDown = lastPrice < previousClose;
 
         if (lastPrice <= 0) {
             currentSignal = "PREȚ INVALID";
             return "Așteptare";
         }
 
-        double atrPercent = (atr / lastPrice) * 100.0;
 
-        currentScore = adx + atrPercent + Math.abs(rsi - 50);
+        double diferenta = Math.abs(emaFast - emaSlow);
+        currentScore = diferenta;
 
-        if (emaFast > emaSlow && candleUp && rsi > 65 && adx > 30 && adx < 60 && atrPercent > 0.10) {
-            currentSignal = "BUY: EMA + RSI + ADX + ATR%";
+        if (emaFast > emaSlow && diferenta > 0.10) {
             return "BUY";
-
-        } else if (emaFast < emaSlow && candleDown && rsi < 35 && adx > 30 && adx < 60 && atrPercent > 0.10) {
-            currentSignal = "SELL: EMA + RSI + ADX + ATR%";
-            return "SELL";
-
-        } else {
-            currentSignal =
-                    "EMA=" + format(emaFast - emaSlow)
-                            + " RSI=" + format(rsi)
-                            + " ADX=" + format(adx)
-                            + " ATR%=" + format(atrPercent);
-
-            return "Așteptare";
         }
+
+        if (emaFast < emaSlow && diferenta > 0.10) {
+            return "SELL";
+        }
+
+        return "Așteptare";
     }
 
+
+// indecator ema
     private static double calculateEMA(double[][] candles, int period) {
         double ema = 0.0;
         double multiplier = 2.0 / (period + 1);
@@ -404,156 +392,6 @@ public class Server {
         return ema;
     }
 
-    private static double calculateRSI(double[][] candles, int period) {
-        if (candles.length <= period) {
-            return 50.0;
-        }
-
-        double gain = 0.0;
-        double loss = 0.0;
-
-        for (int i = 1; i <= period; i++) {
-            double change = candles[i][2] - candles[i - 1][2];
-
-            if (change > 0) {
-                gain += change;
-            } else {
-                loss += Math.abs(change);
-            }
-        }
-
-        double avgGain = gain / period;
-        double avgLoss = loss / period;
-
-        for (int i = period + 1; i < candles.length; i++) {
-            double change = candles[i][2] - candles[i - 1][2];
-
-            double currentGain = change > 0 ? change : 0.0;
-            double currentLoss = change < 0 ? Math.abs(change) : 0.0;
-
-            avgGain = ((avgGain * (period - 1)) + currentGain) / period;
-            avgLoss = ((avgLoss * (period - 1)) + currentLoss) / period;
-        }
-
-        if (avgLoss == 0.0) {
-            return 100.0;
-        }
-
-        double rs = avgGain / avgLoss;
-
-        return 100.0 - (100.0 / (1.0 + rs));
-    }
-
-    private static double calculateADX(double[][] candles, int period) {
-        if (candles.length < period * 2) {
-            return 0.0;
-        }
-
-        double smoothedTR = 0.0;
-        double smoothedPlusDM = 0.0;
-        double smoothedMinusDM = 0.0;
-
-        for (int i = 1; i <= period; i++) {
-            double currentHigh = candles[i][0];
-            double currentLow = candles[i][1];
-            double previousHigh = candles[i - 1][0];
-            double previousLow = candles[i - 1][1];
-            double previousClose = candles[i - 1][2];
-
-            double upMove = currentHigh - previousHigh;
-            double downMove = previousLow - currentLow;
-
-            double plusDM = (upMove > downMove && upMove > 0) ? upMove : 0.0;
-            double minusDM = (downMove > upMove && downMove > 0) ? downMove : 0.0;
-
-            double tr = Math.max(
-                    currentHigh - currentLow,
-                    Math.max(Math.abs(currentHigh - previousClose), Math.abs(currentLow - previousClose))
-            );
-
-            smoothedTR += tr;
-            smoothedPlusDM += plusDM;
-            smoothedMinusDM += minusDM;
-        }
-
-        double adx = 0.0;
-        int dxCount = 0;
-
-        for (int i = period + 1; i < candles.length; i++) {
-            double currentHigh = candles[i][0];
-            double currentLow = candles[i][1];
-            double previousHigh = candles[i - 1][0];
-            double previousLow = candles[i - 1][1];
-            double previousClose = candles[i - 1][2];
-
-            double upMove = currentHigh - previousHigh;
-            double downMove = previousLow - currentLow;
-
-            double plusDM = (upMove > downMove && upMove > 0) ? upMove : 0.0;
-            double minusDM = (downMove > upMove && downMove > 0) ? downMove : 0.0;
-
-            double tr = Math.max(
-                    currentHigh - currentLow,
-                    Math.max(Math.abs(currentHigh - previousClose), Math.abs(currentLow - previousClose))
-            );
-
-            smoothedTR = smoothedTR - (smoothedTR / period) + tr;
-            smoothedPlusDM = smoothedPlusDM - (smoothedPlusDM / period) + plusDM;
-            smoothedMinusDM = smoothedMinusDM - (smoothedMinusDM / period) + minusDM;
-
-            if (smoothedTR == 0.0) {
-                continue;
-            }
-
-            double plusDI = 100.0 * (smoothedPlusDM / smoothedTR);
-            double minusDI = 100.0 * (smoothedMinusDM / smoothedTR);
-
-            double diSum = plusDI + minusDI;
-
-            if (diSum == 0.0) {
-                continue;
-            }
-
-            double dx = 100.0 * Math.abs(plusDI - minusDI) / diSum;
-
-            if (dxCount == 0) {
-                adx = dx;
-            } else {
-                adx = ((adx * (period - 1)) + dx) / period;
-            }
-
-            dxCount++;
-        }
-
-        if (Double.isNaN(adx)) {
-            return 0.0;
-        }
-
-        return adx;
-    }
-
-    private static double calculateATR(double[][] candles, int period) {
-        if (candles.length <= period) {
-            return 0.0;
-        }
-
-        double totalTR = 0.0;
-
-        for (int i = 1; i < candles.length; i++) {
-            double high = candles[i][0];
-            double low = candles[i][1];
-            double prevClose = candles[i - 1][2];
-
-            double tr = Math.max(
-                    high - low,
-                    Math.max(Math.abs(high - prevClose), Math.abs(low - prevClose))
-            );
-
-            totalTR += tr;
-        }
-
-        return totalTR / (candles.length - 1);
-    }
 
     private static double[][] getCandles(String resolution, int max) throws Exception {
         String epicEncoded = URLEncoder.encode(currentEpic, StandardCharsets.UTF_8);
