@@ -75,7 +75,7 @@ public class Server {
                             // Așteaptă închiderea lumânării M5.
                             long wait = millisUntilNext5MinuteCandleClose();
                             currentSignal = "Aștept închiderea lumânării M5...";
-                            Thread.sleep(200);
+                            Thread.sleep(wait);
 
                             currentSignal = "Analizez piața...";
 
@@ -344,7 +344,7 @@ public class Server {
             return "Așteptare";
         }
 
-        double emaFast = calculateEMA(candles, 30);
+        double emaFast = calculateEMA(candles, 31);
         double emaSlow = calculateEMA(candles, 51);
 
 
@@ -358,17 +358,36 @@ public class Server {
 
 
         double diferenta = Math.abs(emaFast - emaSlow);
+
         currentScore = diferenta;
 
-        if (emaFast > emaSlow && diferenta > 0.10) {
+        System.out.println("EMA30 = " + emaFast);
+        System.out.println("EMA51 = " + emaSlow);
+        System.out.println("Pret = " + lastPrice);
+
+
+        if (lastPrice > emaFast && emaFast > emaSlow) {
+            currentSignal = "TREND SUS CONFIRMAT";
             return "BUY";
         }
 
-        if (emaFast < emaSlow && diferenta > 0.10) {
+        if (lastPrice < emaFast && emaFast < emaSlow) {
+            currentSignal = "TREND JOS CONFIRMAT";
             return "SELL";
         }
 
+        if (lastPrice > emaFast && emaFast < emaSlow) {
+            currentSignal = "PREȚ URCĂ, DAR EMA ÎNCĂ NU A CONFIRMAT";
+            return "Așteptare";
+        }
+
+        if (lastPrice < emaFast && emaFast > emaSlow) {
+            currentSignal = "PREȚ CADE, DAR EMA ÎNCĂ NU A CONFIRMAT";
+            return "Așteptare";
+        }
+
         return "Așteptare";
+
     }
 
 
@@ -594,7 +613,7 @@ public class Server {
                 + "\"orderType\":\"MARKET\","
                 + "\"guaranteedStop\":false,"
                 + "\"currencyCode\":\"USD\","
-                + "\"forceOpen\":false"
+                + "\"forceOpen\":true"
                 + "}";
 
         return post("/positions", body);
