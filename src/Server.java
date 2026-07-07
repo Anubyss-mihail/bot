@@ -22,9 +22,7 @@ public class Server {
     private static final String[] EPICS = {
             "GOLD",
             "BTCUSD",
-            "ETHUSD",
-            "XRPUSD",
-            "SOLUSD"
+            "ETHUSD"
     };
 
     private static String currentEpic = "GOLD";
