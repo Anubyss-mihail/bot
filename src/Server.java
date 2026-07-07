@@ -50,8 +50,10 @@ public class Server {
         );
 
         server.createContext("/start", exchange -> {
+
             try {
                 ensureLogin();
+
 
                 if (isBotRunning) {
                     send(exchange, 200, "Bot deja ruleaza.");
@@ -61,10 +63,13 @@ public class Server {
                 isBotRunning = true;
 
                 new Thread(() -> {
-                    try {
-                        while (isBotRunning) {
 
-                            // Dacă există poziție deja deschisă după restart, o monitorizăm.
+                    while (isBotRunning) {
+
+                        try {
+
+                            ensureLogin();
+
                             String existingPositions = get("/positions");
                             String openEpic = getOpenEpicInEpics(existingPositions);
 
@@ -75,7 +80,6 @@ public class Server {
                                 continue;
                             }
 
-                            // Așteaptă închiderea lumânării M5.
                             long wait = millisUntilNext5MinuteCandleClose();
                             currentSignal = "Aștept închiderea lumânării M5...";
                             Thread.sleep(wait);
@@ -136,13 +140,24 @@ public class Server {
                             currentEvent = bestSide;
 
                             monitorOpenPosition();
-                        }
 
-                    } catch (Exception e) {
-                        isBotRunning = false;
-                        currentSignal = "AUTO START ERROR: " + e.getMessage();
-                        System.out.println("AUTO START ERROR: " + e.getMessage());
+                        } catch (Exception e) {
+
+                            currentSignal = "EROARE INTERNET/API: " + e.getMessage()
+                                    + " | Reîncerc în 10 secunde...";
+
+                            System.out.println(currentSignal);
+
+                            CST = "";
+                            SECURITY_TOKEN = "";
+
+                            try {
+                                Thread.sleep(10000);
+                            } catch (InterruptedException ignored) {
+                            }
+                        }
                     }
+
                 }).start();
 
                 send(exchange, 200, "Bot pornit. Analizeaza si intra automat.");
@@ -321,11 +336,7 @@ public class Server {
             currentPnL = getTotalPnLAllPositions();
 
             double pnl = Double.parseDouble(currentPnL);
-            if (pnl > 0) {
-                totalProfit += pnl;
-            } else if (pnl < 0) {
-                totalLoss += Math.abs(pnl);
-            }
+
 
             if (pnl >= 7.0 || pnl <= -3.0) {
                 String positions = get("/positions");
@@ -333,6 +344,12 @@ public class Server {
 
                 if (realDealId != null && !realDealId.isBlank()) {
                     String closeResult = closePosition(realDealId);
+
+                    if (pnl > 0) {
+                        totalProfit += pnl;
+                    } else if (pnl < 0) {
+                        totalLoss += Math.abs(pnl);
+                    }
 
                     currentSignal = "POZIȚIE ÎNCHISĂ: " + closeResult;
                     currentEvent = "CLOSED";
@@ -659,8 +676,8 @@ public class Server {
     private static HttpURLConnection connection(String url, String method) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod(method);
-        conn.setConnectTimeout(10000);
-        conn.setReadTimeout(10000);
+        conn.setConnectTimeout(30000);
+        conn.setReadTimeout(30000);
         return conn;
     }
 
