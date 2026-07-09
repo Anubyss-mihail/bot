@@ -21,8 +21,8 @@ public class Server {
 
     private static final String[] EPICS = {
             "GOLD",
-            "BTCUSD",
-            "ETHUSD"
+            //"BTCUSD",
+           // "ETHUSD"
     };
 
     private static String currentEpic = "GOLD";
@@ -365,52 +365,44 @@ public class Server {
     private static String analyzeMarket() throws Exception {
         currentScore = 0.0;
 
-        double[][] candles = getCandles("MINUTE_5", 101);
+        double[][] candlesM5 = getCandles("MINUTE_5", 101);
+        double[][] candlesM1 = getCandles("MINUTE", 101);
 
-        if (candles.length < 100) {
-            currentSignal = "LUMÂNĂRI INSUFICIENTE: " + candles.length;
+        if (candlesM5.length < 100 || candlesM1.length < 100) {
+            currentSignal = "LUMÂNĂRI INSUFICIENTE M5/M1";
             return "Așteptare";
         }
 
-        double emaFast = calculateEMA(candles, 31);
-        double emaSlow = calculateEMA(candles, 51);
+        double emaFastM5 = calculateEMA(candlesM5, 31);
+        double emaSlowM5 = calculateEMA(candlesM5, 51);
 
+        double emaFastM1 = calculateEMA(candlesM1, 31);
+        double emaSlowM1 = calculateEMA(candlesM1, 51);
 
-        double lastPrice = candles[candles.length - 1][2];
-
+        double lastPrice = candlesM1[candlesM1.length - 1][2];
 
         if (lastPrice <= 0) {
             currentSignal = "PREȚ INVALID";
             return "Așteptare";
         }
 
+        double diferentaM5 = Math.abs(emaFastM5 - emaSlowM5);
+        double diferentaM1 = Math.abs(emaFastM1 - emaSlowM1);
 
-        double diferenta = Math.abs(emaFast - emaSlow);
+        currentScore = diferentaM5 + diferentaM1;
 
-        currentScore = diferenta;
-
-        if (lastPrice > emaFast && emaFast > emaSlow) {
-            currentSignal = "TREND SUS CONFIRMAT";
+        if (emaFastM5 > emaSlowM5 && emaFastM1 > emaSlowM1) {
+            currentSignal = "M5 SUS + M1 SUS";
             return "BUY";
         }
 
-        if (lastPrice < emaFast && emaFast < emaSlow) {
-            currentSignal = "TREND JOS CONFIRMAT";
+        if (emaFastM5 < emaSlowM5 && emaFastM1 < emaSlowM1) {
+            currentSignal = "M5 JOS + M1 JOS";
             return "SELL";
         }
 
-        if (lastPrice > emaFast && emaFast < emaSlow) {
-            currentSignal = "PREȚ URCĂ, DAR EMA ÎNCĂ NU A CONFIRMAT";
-            return "Așteptare";
-        }
-
-        if (lastPrice < emaFast && emaFast > emaSlow) {
-            currentSignal = "PREȚ CADE, DAR EMA ÎNCĂ NU A CONFIRMAT";
-            return "Așteptare";
-        }
-
+        currentSignal = "M5 și M1 nu confirmă";
         return "Așteptare";
-
     }
 
 
@@ -585,10 +577,8 @@ public class Server {
 
     private static double getSizeForEpic(String epic) {
         if (epic.equals("GOLD")) return 0.50;
-        if (epic.equals("BTCUSD")) return 0.01;
-        if (epic.equals("ETHUSD")) return 0.40;
-        if (epic.equals("XRPUSD")) return 600.0;
-        if (epic.equals("SOLUSD")) return 9.00;
+        //if (epic.equals("BTCUSD")) return 0.01;
+       //if (epic.equals("ETHUSD")) return 0.40;
 
         return 0.01;
     }
