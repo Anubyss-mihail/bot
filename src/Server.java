@@ -365,21 +365,17 @@ public class Server {
     private static String analyzeMarket() throws Exception {
         currentScore = 0.0;
 
-        double[][] candlesM5 = getCandles("MINUTE_5", 101);
-        double[][] candlesM1 = getCandles("MINUTE", 101);
+        double[][] candlesM5 = getCandles("MINUTE_5", 46);
 
-        if (candlesM5.length < 100 || candlesM1.length < 100) {
-            currentSignal = "LUMÂNĂRI INSUFICIENTE M5/M1";
+        if (candlesM5.length < 45) {
+            currentSignal = "LUMÂNĂRI INSUFICIENTE M5";
             return "Așteptare";
         }
 
-        double emaFastM5 = calculateEMA(candlesM5, 31);
-        double emaSlowM5 = calculateEMA(candlesM5, 51);
+        double emaFastM5 = calculateEMA(candlesM5, 11);
+        double emaSlowM5 = calculateEMA(candlesM5, 31);
 
-        double emaFastM1 = calculateEMA(candlesM1, 31);
-        double emaSlowM1 = calculateEMA(candlesM1, 51);
-
-        double lastPrice = candlesM1[candlesM1.length - 1][2];
+        double lastPrice = candlesM5[candlesM5.length - 1][2];
 
         if (lastPrice <= 0) {
             currentSignal = "PREȚ INVALID";
@@ -387,44 +383,52 @@ public class Server {
         }
 
         double diferentaM5 = Math.abs(emaFastM5 - emaSlowM5);
-        double diferentaM1 = Math.abs(emaFastM1 - emaSlowM1);
+        currentScore = diferentaM5;
 
-        currentScore = diferentaM5 + diferentaM1;
-
-        if (emaFastM5 > emaSlowM5 && emaFastM1 > emaSlowM1) {
-            currentSignal = "M5 SUS + M1 SUS";
+        if (emaFastM5 > emaSlowM5) {
+            currentSignal = "TREND SUS";
             return "BUY";
         }
 
-        if (emaFastM5 < emaSlowM5 && emaFastM1 < emaSlowM1) {
-            currentSignal = "M5 JOS + M1 JOS";
+        if (emaFastM5 < emaSlowM5) {
+            currentSignal = "TREND JOS";
             return "SELL";
         }
 
-        currentSignal = "M5 și M1 nu confirmă";
+        currentSignal = "Așteptare";
         return "Așteptare";
     }
 
 
 // indecator ema
-    private static double calculateEMA(double[][] candles, int period) {
-        double ema = 0.0;
-        double multiplier = 2.0 / (period + 1);
-        boolean first = true;
+private static double calculateEMA(double[][] candles, int period) {
 
-        for (double[] candle : candles) {
-            double close = candle[2];
-
-            if (first) {
-                ema = close;
-                first = false;
-            } else {
-                ema = (close - ema) * multiplier + ema;
-            }
-        }
-
-        return ema;
+    if (candles == null || candles.length < period) {
+        return 0.0;
     }
+
+    double multiplier = 2.0 / (period + 1);
+
+    int start = candles.length - 1;
+    int end = candles.length - period;
+
+    double sma = 0.0;
+
+    for (int i = start; i >= end; i--) {
+        sma += candles[i][2];
+    }
+
+    sma /= period;
+
+    double ema = sma;
+
+    for (int i = end - 1; i >= 0; i--) {
+        double close = candles[i][2];
+        ema = ((close - ema) * multiplier) + ema;
+    }
+
+    return ema;
+}
 
 
     private static double[][] getCandles(String resolution, int max) throws Exception {
