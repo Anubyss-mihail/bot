@@ -336,7 +336,7 @@ public class Server {
             double pnl = Double.parseDouble(currentPnL);
 
 
-            if (pnl >= 7.0 || pnl <= -3.0) {
+            if (pnl >= 50 || pnl <= -0.50) {
                 String positions = get("/positions");
                 String realDealId = getAnyDealIdInEpics(positions);
 
@@ -363,39 +363,102 @@ public class Server {
     }
 
     private static String analyzeMarket() throws Exception {
+
         currentScore = 0.0;
 
+        // M5 arată direcția principală.
         double[][] candlesM5 = getCandles("MINUTE_5", 46);
+
+        // M1 confirmă momentul intrării.
+        double[][] candlesM1 = getCandles("MINUTE", 46);
 
         if (candlesM5.length < 45) {
             currentSignal = "LUMÂNĂRI INSUFICIENTE M5";
             return "Așteptare";
         }
 
+        if (candlesM1.length < 45) {
+            currentSignal = "LUMÂNĂRI INSUFICIENTE M1";
+            return "Așteptare";
+        }
+
+        // Calculează EMA 11 și EMA 31 pe M5.
         double emaFastM5 = calculateEMA(candlesM5, 11);
         double emaSlowM5 = calculateEMA(candlesM5, 31);
 
-        double lastPrice = candlesM5[candlesM5.length - 1][2];
+        // Calculează EMA 11 și EMA 31 pe M1.
+        double emaFastM1 = calculateEMA(candlesM1, 11);
+        double emaSlowM1 = calculateEMA(candlesM1, 31);
 
-        if (lastPrice <= 0) {
+        /*
+         * calculateEMA() din codul tău tratează poziția 0
+         * ca fiind lumânarea cea mai nouă.
+         */
+        double lastPriceM5 = candlesM5[0][2];
+        double lastPriceM1 = candlesM1[0][2];
+
+        if (lastPriceM5 <= 0 || lastPriceM1 <= 0) {
             currentSignal = "PREȚ INVALID";
             return "Așteptare";
         }
 
+        // Distanța dintre EMA-uri.
         double diferentaM5 = Math.abs(emaFastM5 - emaSlowM5);
-        currentScore = diferentaM5;
+        double diferentaM1 = Math.abs(emaFastM1 - emaSlowM1);
 
-        if (emaFastM5 > emaSlowM5) {
-            currentSignal = "TREND SUS";
+        /*
+         * Filtru pentru piața laterală.
+         * Pragurile se adaptează automat la preț.
+         */
+        double pragM5 = lastPriceM5 * 0.00005;
+        double pragM1 = lastPriceM1 * 0.00002;
+
+        currentScore = diferentaM5 + diferentaM1;
+
+        // Nu intră dacă EMA-urile sunt prea apropiate.
+        if (diferentaM5 < pragM5) {
+            currentSignal = "AȘTEPTARE: M5 FĂRĂ TREND CLAR";
+            return "Așteptare";
+        }
+
+        if (diferentaM1 < pragM1) {
+            currentSignal = "AȘTEPTARE: M1 FĂRĂ CONFIRMARE";
+            return "Așteptare";
+        }
+
+        /*
+         * BUY numai când M5 și M1 confirmă împreună
+         * direcția în sus.
+         */
+        if (emaFastM5 > emaSlowM5 &&
+                emaFastM1 > emaSlowM1 &&
+                lastPriceM1 > emaFastM1) {
+
+            currentSignal =
+                    "BUY: M5 SUS + M1 SUS"
+                            + " | EMA11 M5=" + format(emaFastM5)
+                            + " | EMA31 M5=" + format(emaSlowM5);
+
             return "BUY";
         }
 
-        if (emaFastM5 < emaSlowM5) {
-            currentSignal = "TREND JOS";
+        /*
+         * SELL numai când M5 și M1 confirmă împreună
+         * direcția în jos.
+         */
+        if (emaFastM5 < emaSlowM5 &&
+                emaFastM1 < emaSlowM1 &&
+                lastPriceM1 < emaFastM1) {
+
+            currentSignal =
+                    "SELL: M5 JOS + M1 JOS"
+                            + " | EMA11 M5=" + format(emaFastM5)
+                            + " | EMA31 M5=" + format(emaSlowM5);
+
             return "SELL";
         }
 
-        currentSignal = "Așteptare";
+        currentSignal = "AȘTEPTARE: M5 ȘI M1 NU CONFIRMĂ";
         return "Așteptare";
     }
 
@@ -580,7 +643,7 @@ private static double calculateEMA(double[][] candles, int period) {
     }
 
     private static double getSizeForEpic(String epic) {
-        if (epic.equals("GOLD")) return 0.50;
+        if (epic.equals("GOLD")) return 1.3;
         //if (epic.equals("BTCUSD")) return 0.01;
        //if (epic.equals("ETHUSD")) return 0.40;
 
