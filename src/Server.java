@@ -22,7 +22,7 @@ public class Server {
     private static final String[] EPICS = {
             "GOLD",
             //"BTCUSD",
-           // "ETHUSD"
+            // "ETHUSD"
     };
 
     private static String currentEpic = "GOLD";
@@ -34,10 +34,12 @@ public class Server {
     private static String currentSignal = "Așteptare";
     private static String currentPrice = "--";
     private static String currentPnL = "0.00";
-    private static double currentScore = 0.0;
     private static String currentEvent = "NONE";
     private static double totalProfit = 0.0;
     private static double totalLoss = 0.0;
+
+    private static final ArrayList<Double> prices = new ArrayList<>();
+    private static final int MAX_PRICES = 500;
 
     public static void main(String[] args) throws Exception {
 
@@ -68,6 +70,22 @@ public class Server {
 
                             ensureLogin();
 
+                            double[][] candles = getCandles("MINUTE", 101);
+
+
+                            MarketAnalyzer analyzer = new Server().new MarketAnalyzer();
+                            analyzer.analyze(candles);
+                            MarketAnalyzer.Signal signal = analyzer.getSignal();
+
+                            //  System.out.println("Trend = " + analyzer.getTrend());
+                           //   System.out.println("Resistance = " + analyzer.getResistance());
+                           //  System.out.println("Support = " + analyzer.getSupport());
+                           //  System.out.println("Strength = " + analyzer.getTrendStrength());
+                           // System.out.println("Signal = " + analyzer.getSignal());
+
+                            currentSignal = signal.name();
+
+
                             String existingPositions = get("/positions");
                             String openEpic = getOpenEpicInEpics(existingPositions);
 
@@ -75,35 +93,6 @@ public class Server {
                                 currentEpic = openEpic;
                                 currentSignal = "MONITORIZEZ POZIȚIA " + currentEpic;
                                 monitorOpenPosition();
-                                continue;
-                            }
-
-                            long wait = millisUntilNext5MinuteCandleClose();
-                            currentSignal = "Aștept închiderea lumânării M5...";
-                            Thread.sleep(wait);
-
-                            currentSignal = "Analizez piața...";
-
-                            String bestEpic = currentEpic;
-                            String bestSide = "Așteptare";
-                            double bestScore = 0.0;
-
-                            for (String epic : EPICS) {
-                                currentEpic = epic;
-
-                                String signal = analyzeMarket();
-                                double score = currentScore;
-
-                                if (!signal.equals("Așteptare") && score > bestScore) {
-                                    bestScore = score;
-                                    bestEpic = epic;
-                                    bestSide = signal;
-                                }
-                            }
-
-                            currentEpic = bestEpic;
-
-                            if (bestSide.equals("Așteptare")) {
                                 continue;
                             }
 
@@ -115,29 +104,6 @@ public class Server {
                                 continue;
                             }
 
-                            double size = getSizeForEpic(currentEpic);
-
-                            String openResult = openPosition(bestSide, size);
-
-                            if (openResult == null || openResult.isBlank() || !openResult.contains("dealReference")) {
-                                currentSignal = "EROARE OPEN: " + openResult;
-                                Thread.sleep(10000);
-                                continue;
-                            }
-
-                            String dealReference = extractJsonValue(openResult, "dealReference");
-                            String confirmResult = confirmDeal(dealReference);
-
-                            if (confirmResult == null || !confirmResult.contains("ACCEPTED")) {
-                                currentSignal = "ORDIN RESPINS: " + confirmResult;
-                                Thread.sleep(10000);
-                                continue;
-                            }
-
-                            currentSignal = bestSide + " CONFIRMAT " + currentEpic;
-                            currentEvent = bestSide;
-
-                            monitorOpenPosition();
 
                         } catch (Exception e) {
 
@@ -214,8 +180,8 @@ public class Server {
                     currentSignal = "Așteptare";
                     currentPnL = "0.00";
                 }
-
                 currentPrice = getCurrentPrice();
+                System.out.println("Preturi memorate: " + prices.size());
                 currentPnL = getTotalPnLAllPositions();
 
             } catch (Exception e) {
@@ -263,71 +229,179 @@ public class Server {
             }
         });
 
-        server.createContext("/analyze-fast", exchange -> {
-            try {
-                ensureLogin();
 
-                String oldEpic = currentEpic;
-                StringBuilder result = new StringBuilder();
-
-                for (String epic : EPICS) {
-                    currentEpic = epic;
-
-                    String price = getCurrentPrice();
-                    String signal = analyzeMarket();
-
-                    result.append(epic)
-                            .append(" = ")
-                            .append(price)
-                            .append(" -> ")
-                            .append(signal)
-                            .append(" | ")
-                            .append(currentSignal)
-                            .append("\n");
-                }
-
-                currentEpic = oldEpic;
-
-                send(exchange, 200, result.toString());
-
-            } catch (Exception e) {
-                sendSafe(exchange, 500, "ANALYZE FAST ERROR: " + e.getMessage());
-            }
-        });
-
-        server.createContext("/analyze", exchange -> {
-            try {
-                ensureLogin();
-
-                String oldEpic = currentEpic;
-                StringBuilder result = new StringBuilder();
-
-                for (String epic : EPICS) {
-                    currentEpic = epic;
-
-                    String signal = analyzeMarket();
-
-                    result.append(epic)
-                            .append(" -> ")
-                            .append(signal)
-                            .append(" | ")
-                            .append(currentSignal)
-                            .append("\n");
-                }
-
-                currentEpic = oldEpic;
-
-                send(exchange, 200, result.toString());
-
-            } catch (Exception e) {
-                sendSafe(exchange, 500, "ANALYZE ERROR: " + e.getMessage());
-            }
-        });
 
         server.start();
 
         System.out.println("Server pornit: http://localhost:8080");
     }
+
+    public class MarketAnalyzer {
+
+        public enum Trend {
+            UP,
+            DOWN,
+            SIDEWAYS
+        }
+
+        public enum Signal {
+            BUY,
+            SELL,
+            WAIT
+        }
+
+        private Trend trend = Trend.SIDEWAYS;
+
+        public Trend getTrend() {
+            return trend;
+        }
+
+        public double getSupport() {
+            return support;
+        }
+
+        public double getResistance() {
+            return resistance;
+        }
+
+        public double getTrendStrength() {
+            return trendStrength;
+        }
+
+        private double support;
+        private double resistance;
+
+        private double trendStrength;
+
+        private Signal signal = Signal.WAIT;
+
+        public void analyze(double[][] candles) {
+            trend = detectTrend(candles);
+            support = detectSupport(candles);
+            resistance = detectResistance(candles);
+            trendStrength = calculateTrendStrength(candles);
+            signal = generateSignal(candles);
+        }
+
+        private Trend detectTrend(double[][] candles) {
+
+            if (candles.length < 20) {
+                return Trend.SIDEWAYS;
+            }
+
+            int higherHigh = 0;
+            int higherLow = 0;
+
+            int lowerHigh = 0;
+            int lowerLow = 0;
+
+            for (int i = 1; i < candles.length; i++) {
+
+                double previousHigh = candles[i - 1][0];
+                double currentHigh = candles[i][0];
+
+                double previousLow = candles[i - 1][1];
+                double currentLow = candles[i][1];
+
+                if (currentHigh > previousHigh) {
+                    higherHigh++;
+                }
+
+                if (currentLow > previousLow) {
+                    higherLow++;
+                }
+
+                if (currentHigh < previousHigh) {
+                    lowerHigh++;
+                }
+
+                if (currentLow < previousLow) {
+                    lowerLow++;
+                }
+
+            }
+
+            if (higherHigh > lowerHigh && higherLow > lowerLow) {
+                return Trend.UP;
+            }
+
+            if (lowerHigh > higherHigh && lowerLow > higherLow) {
+                return Trend.DOWN;
+            }
+
+            return Trend.SIDEWAYS;
+        }
+
+        private double detectSupport(double[][] candles) {
+
+            double support = Double.MAX_VALUE;
+
+            for (int i = 0; i < candles.length; i++) {
+
+                double low = candles[i][1];
+
+                if (low < support) {
+                    support = low;
+                }
+
+            }
+
+            return support;
+        }
+
+        private double detectResistance(double[][] candles) {
+
+            double resistance = Double.MIN_VALUE;
+
+            for (int i = 0; i < candles.length; i++) {
+
+                double high = candles[i][0];
+
+                if (high > resistance) {
+                    resistance = high;
+                }
+
+            }
+
+            return resistance;
+        }
+
+        private double calculateTrendStrength(double[][] candles) {
+
+            if (candles.length < 2) {
+                return 0;
+            }
+
+            double total = 0;
+
+            for (int i = 1; i < candles.length; i++) {
+
+                total += Math.abs(candles[i][2] - candles[i - 1][2]);
+
+            }
+
+            return total;
+        }
+
+        private Signal generateSignal(double[][] candles) {
+
+            double currentPrice = candles[candles.length - 1][2];
+
+            if (trend == Trend.UP && currentPrice > support) {
+                return Signal.BUY;
+            }
+
+            if (trend == Trend.DOWN && currentPrice < resistance) {
+                return Signal.SELL;
+            }
+
+            return Signal.WAIT;
+        }
+        public Signal getSignal() {
+            return signal;
+        }
+    }
+
 
     private static void monitorOpenPosition() throws Exception {
         while (isBotRunning) {
@@ -362,136 +436,19 @@ public class Server {
         }
     }
 
-    private static String analyzeMarket() throws Exception {
-
-        currentScore = 0.0;
-
-        // M5 arată direcția principală.
-        double[][] candlesM5 = getCandles("MINUTE_5", 46);
-
-        // M1 confirmă momentul intrării.
-        double[][] candlesM1 = getCandles("MINUTE", 46);
-
-        if (candlesM5.length < 45) {
-            currentSignal = "LUMÂNĂRI INSUFICIENTE M5";
-            return "Așteptare";
-        }
-
-        if (candlesM1.length < 45) {
-            currentSignal = "LUMÂNĂRI INSUFICIENTE M1";
-            return "Așteptare";
-        }
-
-        // Calculează EMA 11 și EMA 31 pe M5.
-        double emaFastM5 = calculateEMA(candlesM5, 11);
-        double emaSlowM5 = calculateEMA(candlesM5, 31);
-
-        // Calculează EMA 11 și EMA 31 pe M1.
-        double emaFastM1 = calculateEMA(candlesM1, 11);
-        double emaSlowM1 = calculateEMA(candlesM1, 31);
-
-        /*
-         * calculateEMA() din codul tău tratează poziția 0
-         * ca fiind lumânarea cea mai nouă.
-         */
-        double lastPriceM5 = candlesM5[0][2];
-        double lastPriceM1 = candlesM1[0][2];
-
-        if (lastPriceM5 <= 0 || lastPriceM1 <= 0) {
-            currentSignal = "PREȚ INVALID";
-            return "Așteptare";
-        }
-
-        // Distanța dintre EMA-uri.
-        double diferentaM5 = Math.abs(emaFastM5 - emaSlowM5);
-        double diferentaM1 = Math.abs(emaFastM1 - emaSlowM1);
-
-        /*
-         * Filtru pentru piața laterală.
-         * Pragurile se adaptează automat la preț.
-         */
-        double pragM5 = lastPriceM5 * 0.00005;
-        double pragM1 = lastPriceM1 * 0.00002;
-
-        currentScore = diferentaM5 + diferentaM1;
-
-        // Nu intră dacă EMA-urile sunt prea apropiate.
-        if (diferentaM5 < pragM5) {
-            currentSignal = "AȘTEPTARE: M5 FĂRĂ TREND CLAR";
-            return "Așteptare";
-        }
-
-        if (diferentaM1 < pragM1) {
-            currentSignal = "AȘTEPTARE: M1 FĂRĂ CONFIRMARE";
-            return "Așteptare";
-        }
-
-        /*
-         * BUY numai când M5 și M1 confirmă împreună
-         * direcția în sus.
-         */
-        if (emaFastM5 > emaSlowM5 &&
-                emaFastM1 > emaSlowM1 &&
-                lastPriceM1 > emaFastM1) {
-
-            currentSignal =
-                    "BUY: M5 SUS + M1 SUS"
-                            + " | EMA11 M5=" + format(emaFastM5)
-                            + " | EMA31 M5=" + format(emaSlowM5);
-
-            return "BUY";
-        }
-
-        /*
-         * SELL numai când M5 și M1 confirmă împreună
-         * direcția în jos.
-         */
-        if (emaFastM5 < emaSlowM5 &&
-                emaFastM1 < emaSlowM1 &&
-                lastPriceM1 < emaFastM1) {
-
-            currentSignal =
-                    "SELL: M5 JOS + M1 JOS"
-                            + " | EMA11 M5=" + format(emaFastM5)
-                            + " | EMA31 M5=" + format(emaSlowM5);
-
-            return "SELL";
-        }
-
-        currentSignal = "AȘTEPTARE: M5 ȘI M1 NU CONFIRMĂ";
-        return "Așteptare";
+    private static ArrayList<Double> getPrices() {
+        return prices;
     }
 
+    private static void addPrice(double price) {
 
-// indecator ema
-private static double calculateEMA(double[][] candles, int period) {
+        prices.add(price);
 
-    if (candles == null || candles.length < period) {
-        return 0.0;
+        if (prices.size() > MAX_PRICES) {
+            prices.remove(0);
+        }
+
     }
-
-    double multiplier = 2.0 / (period + 1);
-
-    int start = candles.length - 1;
-    int end = candles.length - period;
-
-    double sma = 0.0;
-
-    for (int i = start; i >= end; i--) {
-        sma += candles[i][2];
-    }
-
-    sma /= period;
-
-    double ema = sma;
-
-    for (int i = end - 1; i >= 0; i--) {
-        double close = candles[i][2];
-        ema = ((close - ema) * multiplier) + ema;
-    }
-
-    return ema;
-}
 
 
     private static double[][] getCandles(String resolution, int max) throws Exception {
@@ -523,6 +480,10 @@ private static double calculateEMA(double[][] candles, int period) {
         String response = get("/prices/" + epicEncoded + "?resolution=MINUTE&max=2");
 
         double price = extractLastCloseMid(response);
+
+        if (price > 0) {
+            addPrice(price);
+        }
 
         if (price <= 0) {
             return "--";
@@ -581,9 +542,6 @@ private static double calculateEMA(double[][] candles, int period) {
         return json.substring(start, end);
     }
 
-    private static String confirmDeal(String dealReference) throws Exception {
-        return get("/confirms/" + URLEncoder.encode(dealReference, StandardCharsets.UTF_8));
-    }
 
     private static String getAnyDealIdInEpics(String positions) {
         String oldEpic = currentEpic;
@@ -642,13 +600,6 @@ private static double calculateEMA(double[][] candles, int period) {
         return false;
     }
 
-    private static double getSizeForEpic(String epic) {
-        if (epic.equals("GOLD")) return 1.3;
-        //if (epic.equals("BTCUSD")) return 0.01;
-       //if (epic.equals("ETHUSD")) return 0.40;
-
-        return 0.01;
-    }
 
     private static void login() throws Exception {
         String body = "{"
@@ -683,21 +634,6 @@ private static double calculateEMA(double[][] candles, int period) {
         }
     }
 
-    private static String openPosition(String side, double size) throws Exception {
-        String direction = side.equals("SELL") ? "SELL" : "BUY";
-
-        String body = "{"
-                + "\"epic\":\"" + currentEpic + "\","
-                + "\"direction\":\"" + direction + "\","
-                + "\"size\":" + size + ","
-                + "\"orderType\":\"MARKET\","
-                + "\"guaranteedStop\":false,"
-                + "\"currencyCode\":\"USD\","
-                + "\"forceOpen\":true"
-                + "}";
-
-        return post("/positions", body);
-    }
 
     private static String closePosition(String dealId) throws Exception {
         return delete("/positions/" + URLEncoder.encode(dealId, StandardCharsets.UTF_8));
@@ -806,11 +742,6 @@ private static double calculateEMA(double[][] candles, int period) {
         }
     }
 
-    private static long millisUntilNext5MinuteCandleClose() {
-        long now = System.currentTimeMillis();
-        long fiveMinutes = 5 * 60 * 1000;
-        long nextClose = ((now / fiveMinutes) + 1) * fiveMinutes;
 
-        return nextClose - now + 2000;
-    }
+
 }
