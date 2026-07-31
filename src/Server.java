@@ -397,39 +397,48 @@ public class Server {
             return Trend.SIDEWAYS;
         }
 
-        private double detectSupport(double[][] candles) {
-
-            double support = Double.MAX_VALUE;
-
-            for (int i = 0; i < candles.length; i++) {
-
-                double low = candles[i][1];
-
-                if (low < support) {
-                    support = low;
-                }
-
-            }
-
-            return support;
-        }
-
         private double detectResistance(double[][] candles) {
 
-            double resistance = Double.MIN_VALUE;
+            if (candles == null || candles.length < 2) {
+                return 0;
+            }
 
-            for (int i = 0; i < candles.length; i++) {
+            double resistance = -Double.MAX_VALUE;
+
+            // Nu includem ultima lumânare.
+            for (int i = 0; i < candles.length - 1; i++) {
 
                 double high = candles[i][0];
 
                 if (high > resistance) {
                     resistance = high;
                 }
-
             }
 
             return resistance;
         }
+
+        private double detectSupport(double[][] candles) {
+
+            if (candles == null || candles.length < 2) {
+                return 0;
+            }
+
+            double support = Double.MAX_VALUE;
+
+            // Nu includem ultima lumânare.
+            for (int i = 0; i < candles.length - 1; i++) {
+
+                double low = candles[i][1];
+
+                if (low < support) {
+                    support = low;
+                }
+            }
+
+            return support;
+        }
+
 
         private double calculateTrendStrength(double[][] candles) {
 
@@ -450,22 +459,48 @@ public class Server {
 
         private Signal generateSignal(double[][] candles) {
 
+            if (candles == null || candles.length < 20) {
+                return Signal.WAIT;
+            }
+
+            double firstPrice = candles[0][2];
             double currentPrice = candles[candles.length - 1][2];
 
-            if (trend == Trend.UP && currentPrice > support) {
+            double netMove = Math.abs(currentPrice - firstPrice);
+
+            double efficiency = 0;
+
+            if (trendStrength > 0) {
+                efficiency = netMove / trendStrength;
+            }
+
+            boolean strongTrend = efficiency >= 0.30;
+
+            if (trend == Trend.UP
+                    && currentPrice > firstPrice
+                    && strongTrend
+                    && currentPrice > resistance) {
+
                 return Signal.BUY;
             }
 
-            if (trend == Trend.DOWN && currentPrice < resistance) {
+            if (trend == Trend.DOWN
+                    && currentPrice < firstPrice
+                    && strongTrend
+                    && currentPrice < support) {
+
                 return Signal.SELL;
             }
 
             return Signal.WAIT;
         }
+
+
         public Signal getSignal() {
             return signal;
         }
-    }
+
+    } // aici se închide clasa MarketAnalyzer
 
     private static void monitorOpenPosition() throws Exception {
 
@@ -493,19 +528,33 @@ public class Server {
                         totalLoss += Math.abs(pnl);
                     }
 
-                    currentSignal =
-                            "POZIȚIE ÎNCHISĂ: "
-                                    + closeResult;
-
                     currentEvent = "CLOSED";
                     currentPnL = "0.00";
+
+                    if (totalProfit >= 50.0) {
+
+                        currentSignal =
+                                "PROFIT 50 ATINS - REIA ÎN 5 SECUNDE";
+
+                        System.out.println(currentSignal);
+
+                        Thread.sleep(5000);
+
+                        totalProfit = 0.0;
+                        totalLoss = 0.0;
+
+                        currentSignal = "REIA ANALIZA";
+
+                    } else {
+
+                        currentSignal =
+                                "POZIȚIE ÎNCHISĂ: " + closeResult;
+                    }
 
                     Thread.sleep(3000);
                     break;
                 }
             }
-
-            Thread.sleep(3000);
         }
     }
 
