@@ -15,9 +15,9 @@ public class Server {
 
     private static final String BASE_URL = "https://demo-api-capital.backend-capital.com/api/v1";
 
-    private static final String API_KEY = "fq3dOSfe3zSXgy2e";
+    private static final String API_KEY = "O9C2UyYntIPy2XqH";
     private static final String EMAIL = "anubyssanubyss@gmail.com";
-    private static final String API_PASSWORD = "Moldova123.";
+    private static final String API_PASSWORD = "Moldova1/.";
 
     private static final String[] EPICS = {
             "GOLD",
@@ -37,13 +37,13 @@ public class Server {
     private static String currentEvent = "NONE";
     private static double totalProfit = 0.0;
     private static double totalLoss = 0.0;
+    private static final double ORDER_SIZE = 1.5;
 
-    private static final ArrayList<Double> prices = new ArrayList<>();
-    private static final int MAX_PRICES = 500;
 
     public static void main(String[] args) throws Exception {
 
         HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
+        server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
 
         server.createContext("/", exchange ->
                 send(exchange, 200, "Server Capital.com API OK")
@@ -96,12 +96,78 @@ public class Server {
                                 continue;
                             }
 
-                            String preOpenPositions = get("/positions");
+                            if (signal == MarketAnalyzer.Signal.WAIT) {
 
-                            if (hasAnyOpenPositionInEpics(preOpenPositions)) {
-                                currentSignal = "EXISTĂ DEJA O POZIȚIE DESCHISĂ - MONITORIZEZ";
-                                monitorOpenPosition();
+                                currentSignal = "WAIT";
+                                Thread.sleep(3000);
                                 continue;
+                            }
+
+                            String openResult =
+                                    openPosition(signal, ORDER_SIZE);
+
+                            System.out.println(
+                                    "RĂSPUNS OPEN: " + openResult
+                            );
+
+                            String dealReference =
+                                    extractJsonValue(
+                                            openResult,
+                                            "dealReference"
+                                    );
+
+                            if (dealReference == null
+                                    || dealReference.isBlank()) {
+
+                                currentSignal =
+                                        "EROARE OPEN: " + openResult;
+
+                                Thread.sleep(5000);
+                                continue;
+                            }
+
+                            String confirmResult =
+                                    confirmDeal(dealReference);
+
+                            String dealStatus =
+                                    extractJsonValue(
+                                            confirmResult,
+                                            "dealStatus"
+                                    );
+
+                            if ("ACCEPTED".equalsIgnoreCase(dealStatus)) {
+
+                                currentSignal =
+                                        signal.name()
+                                                + " CONFIRMAT "
+                                                + currentEpic;
+
+                                currentEvent = signal.name();
+
+                                System.out.println(
+                                        "POZIȚIE DESCHISĂ: "
+                                                + confirmResult
+                                );
+
+                                monitorOpenPosition();
+
+                            } else {
+
+                                String reason =
+                                        extractJsonValue(
+                                                confirmResult,
+                                                "reason"
+                                        );
+
+                                currentSignal =
+                                        "ORDIN RESPINS: "
+                                                + (reason != null
+                                                ? reason
+                                                : confirmResult);
+
+                                System.out.println(currentSignal);
+
+                                Thread.sleep(5000);
                             }
 
 
@@ -181,7 +247,6 @@ public class Server {
                     currentPnL = "0.00";
                 }
                 currentPrice = getCurrentPrice();
-                System.out.println("Preturi memorate: " + prices.size());
                 currentPnL = getTotalPnLAllPositions();
 
             } catch (Exception e) {
@@ -402,20 +467,25 @@ public class Server {
         }
     }
 
-
     private static void monitorOpenPosition() throws Exception {
+
         while (isBotRunning) {
+
             currentPnL = getTotalPnLAllPositions();
 
             double pnl = Double.parseDouble(currentPnL);
 
-
             if (pnl >= 50 || pnl <= -0.50) {
-                String positions = get("/positions");
-                String realDealId = getAnyDealIdInEpics(positions);
 
-                if (realDealId != null && !realDealId.isBlank()) {
-                    String closeResult = closePosition(realDealId);
+                String positions = get("/positions");
+                String realDealId =
+                        getAnyDealIdInEpics(positions);
+
+                if (realDealId != null
+                        && !realDealId.isBlank()) {
+
+                    String closeResult =
+                            closePosition(realDealId);
 
                     if (pnl > 0) {
                         totalProfit += pnl;
@@ -423,7 +493,10 @@ public class Server {
                         totalLoss += Math.abs(pnl);
                     }
 
-                    currentSignal = "POZIȚIE ÎNCHISĂ: " + closeResult;
+                    currentSignal =
+                            "POZIȚIE ÎNCHISĂ: "
+                                    + closeResult;
+
                     currentEvent = "CLOSED";
                     currentPnL = "0.00";
 
@@ -434,20 +507,6 @@ public class Server {
 
             Thread.sleep(3000);
         }
-    }
-
-    private static ArrayList<Double> getPrices() {
-        return prices;
-    }
-
-    private static void addPrice(double price) {
-
-        prices.add(price);
-
-        if (prices.size() > MAX_PRICES) {
-            prices.remove(0);
-        }
-
     }
 
 
@@ -480,10 +539,6 @@ public class Server {
         String response = get("/prices/" + epicEncoded + "?resolution=MINUTE&max=2");
 
         double price = extractLastCloseMid(response);
-
-        if (price > 0) {
-            addPrice(price);
-        }
 
         if (price <= 0) {
             return "--";
@@ -590,15 +645,7 @@ public class Server {
         return extractJsonValue(positionBlock, "dealId");
     }
 
-    private static boolean hasAnyOpenPositionInEpics(String positions) {
-        for (String epic : EPICS) {
-            if (positions.contains("\"epic\":\"" + epic + "\"")) {
-                return true;
-            }
-        }
 
-        return false;
-    }
 
 
     private static void login() throws Exception {
@@ -639,20 +686,102 @@ public class Server {
         return delete("/positions/" + URLEncoder.encode(dealId, StandardCharsets.UTF_8));
     }
 
+    private static String openPosition(
+            MarketAnalyzer.Signal signal,
+            double size
+    ) throws Exception {
+
+        if (signal == MarketAnalyzer.Signal.WAIT) {
+            throw new IllegalArgumentException(
+                    "Nu deschid poziție pentru semnalul WAIT"
+            );
+        }
+
+        String body = String.format(
+                java.util.Locale.US,
+                "{"
+                        + "\"epic\":\"%s\","
+                        + "\"direction\":\"%s\","
+                        + "\"size\":%.2f,"
+                        + "\"guaranteedStop\":false"
+                        + "}",
+                currentEpic,
+                signal.name(),
+                size
+        );
+
+        System.out.println("TRIMIT ORDIN: " + body);
+
+        return post("/positions", body);
+    }
+
+
+    private static String confirmDeal(
+            String dealReference
+    ) throws Exception {
+
+        String lastResponse = "";
+
+        for (int attempt = 1; attempt <= 5; attempt++) {
+
+            Thread.sleep(1000);
+
+            lastResponse = get(
+                    "/confirms/"
+                            + URLEncoder.encode(
+                            dealReference,
+                            StandardCharsets.UTF_8
+                    )
+            );
+
+            System.out.println(
+                    "CONFIRMARE ORDIN " + attempt
+                            + ": " + lastResponse
+            );
+
+            String dealStatus =
+                    extractJsonValue(lastResponse, "dealStatus");
+
+            if (dealStatus != null && !dealStatus.isBlank()) {
+                return lastResponse;
+            }
+        }
+
+        return lastResponse;
+    }
+
+
     private static String get(String path) throws Exception {
         HttpURLConnection conn = connection(BASE_URL + path, "GET");
         addAuthHeaders(conn);
         return readResponse(conn);
     }
 
-    private static String post(String path, String body) throws Exception {
-        HttpURLConnection conn = connection(BASE_URL + path, "POST");
+    private static String post(
+            String path,
+            String body
+    ) throws Exception {
+
+        HttpURLConnection conn =
+                connection(BASE_URL + path, "POST");
+
         addAuthHeaders(conn);
-        conn.setRequestProperty("Content-Type", "application/json");
+
+        conn.setRequestProperty(
+                "Content-Type",
+                "application/json"
+        );
+
         conn.setDoOutput(true);
 
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(body.getBytes(StandardCharsets.UTF_8));
+        try (OutputStream os =
+                     conn.getOutputStream()) {
+
+            os.write(
+                    body.getBytes(
+                            StandardCharsets.UTF_8
+                    )
+            );
         }
 
         return readResponse(conn);
