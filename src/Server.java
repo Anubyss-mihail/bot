@@ -37,7 +37,7 @@ public class Server {
     private static String currentEvent = "NONE";
     private static double totalProfit = 0.0;
     private static double totalLoss = 0.0;
-    private static final double ORDER_SIZE = 1.5;
+    private static final double ORDER_SIZE = 13;
 
 
     public static void main(String[] args) throws Exception {
